@@ -1,0 +1,146 @@
+<?php
+
+namespace App\Services;
+
+use App\Domain\Stars\StarRating;
+use App\Enums\RatingSource;
+use App\Models\Club;
+use App\Models\Player;
+use App\Rules\DuprPlayerId;
+use Illuminate\Database\UniqueConstraintViolationException;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
+
+/**
+ * Player writes. Input is expected to be validated already (see
+ * App\Concerns\PlayerValidationRules); this service normalizes the DUPR ID
+ * and resolves rating source and stars. Players are never hard-deleted.
+ */
+class PlayerService
+{
+    /**
+     * @param  array{name: string, dupr_id?: string|null, dupr_rating?: float|int|string|null, rating_source?: RatingSource|string|null, stars?: int|null}  $data
+     */
+    public function create(Club $club, array $data): Player
+    {
+        $player = new Player(['active' => true]);
+        $player->club()->associate($club);
+
+        return $this->persist($player, $club, $data);
+    }
+
+    /**
+     * Partial update: only keys present in $data change.
+     *
+     * @param  array{name?: string, dupr_id?: string|null, dupr_rating?: float|int|string|null, rating_source?: RatingSource|string|null, stars?: int|null}  $data
+     */
+    public function update(Player $player, array $data): Player
+    {
+        return $this->persist($player, $player->club ?? $player->club()->firstOrFail(), $data);
+    }
+
+    public function deactivate(Player $player): Player
+    {
+        $player->forceFill(['active' => false])->save();
+
+        return $player;
+    }
+
+    public function reactivate(Player $player): Player
+    {
+        $player->forceFill(['active' => true])->save();
+
+        return $player;
+    }
+
+    /**
+     * The DUPR ID is normalized in save(), and a unique-index violation (a race,
+     * or a caller that skipped validation) becomes a validation error, not a 500.
+     *
+     * @param  array<string, mixed>  $data
+     *
+     * @throws ValidationException
+     */
+    private function persist(Player $player, Club $club, array $data): Player
+    {
+        try {
+            return DB::transaction(function () use ($player, $club, $data): Player {
+                // Lock the club row so stars are never derived from bands that a
+                // concurrent band edit is replacing.
+                $fresh = Club::query()->whereKey($club->id)->lockForUpdate()->first() ?? $club;
+
+                return $this->save($player, $fresh, $data);
+            });
+        } catch (UniqueConstraintViolationException) {
+            throw ValidationException::withMessages([
+                'dupr_id' => 'Another player in this club already has this DUPR ID.',
+            ]);
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     */
+    private function save(Player $player, Club $club, array $data): Player
+    {
+        $exists = $player->exists;
+
+        $name = array_key_exists('name', $data) ? trim((string) $data['name']) : $player->name;
+        $duprId = array_key_exists('dupr_id', $data) ? DuprPlayerId::normalize($data['dupr_id']) : $player->dupr_id;
+
+        $rating = $exists ? $player->dupr_rating : null;
+        if (array_key_exists('dupr_rating', $data)) {
+            $rating = ($data['dupr_rating'] === null || $data['dupr_rating'] === '')
+                ? null
+                : number_format((float) $data['dupr_rating'], 3, '.', '');
+        }
+
+        // Resolve the rating source.
+        if ($rating === null) {
+            $source = RatingSource::Manual;
+        } elseif (array_key_exists('rating_source', $data) && $data['rating_source'] !== null) {
+            $source = $data['rating_source'] instanceof RatingSource
+                ? $data['rating_source']
+                : RatingSource::from((string) $data['rating_source']);
+        } elseif ($exists && $player->dupr_rating !== null) {
+            $source = $player->rating_source;
+        } else {
+            $source = RatingSource::Dupr;
+        }
+
+        // Resolve stars.
+        if ($source === RatingSource::Dupr && $rating !== null) {
+            if (array_key_exists('stars', $data) && $data['stars'] !== null) {
+                throw ValidationException::withMessages(['stars' => 'Switch to manual to override stars.']);
+            }
+
+            $stars = StarRating::fromRating((float) $rating, $this->bands($club));
+        } else {
+            $stars = array_key_exists('stars', $data) && $data['stars'] !== null
+                ? (int) $data['stars']
+                : ($exists ? $player->stars : null);
+
+            if ($stars === null) {
+                throw ValidationException::withMessages(['stars' => 'Stars are required for players without a DUPR rating.']);
+            }
+        }
+
+        $player->forceFill([
+            'name' => $name,
+            'dupr_id' => $duprId,
+            'dupr_rating' => $rating,
+            'rating_source' => $source,
+            'stars' => $stars,
+        ])->save();
+
+        return $player;
+    }
+
+    /**
+     * @return list<float>
+     */
+    private function bands(Club $club): array
+    {
+        return array_map(fn ($b): float => (float) $b, $club->star_bands);
+    }
+}

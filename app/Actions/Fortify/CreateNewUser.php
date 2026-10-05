@@ -12,6 +12,9 @@ class CreateNewUser implements CreatesNewUsers
 {
     use PasswordValidationRules, ProfileValidationRules;
 
+    /** Name of the hidden honeypot field in the registration form. */
+    public const HONEYPOT = 'homepage_url';
+
     /**
      * Validate and create a newly registered user.
      *
@@ -22,6 +25,10 @@ class CreateNewUser implements CreatesNewUsers
         Validator::make($input, [
             ...$this->profileRules(),
             'password' => $this->passwordRules(),
+            // Honeypot: hidden from people, so any value means a bot.
+            self::HONEYPOT => ['prohibited'],
+        ], [
+            self::HONEYPOT.'.prohibited' => 'Registration could not be completed.',
         ])->validate();
 
         return User::create([

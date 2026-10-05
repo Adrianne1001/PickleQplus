@@ -22,7 +22,7 @@ A free, self-hosted Laravel app modelled on PickleQ's **Venue Pro** plan: open-p
 | DUPR | **CSV export in v1.** API sync behind a feature flag, enabled once DUPR approves Partner API access. Matches where any player lacks a DUPR ID are **skipped with a warning**. |
 | Fees | None. |
 | Scaffold (Phase 0) | Laravel 13 with the official Livewire starter kit (`laravel/livewire-starter-kit:dev-main`: Livewire 4, Flux, Fortify auth with email verification, 2FA, passkeys). Livewire single-file components use the kit's `⚡` filename prefix. |
-| Testing and lint | Pest 4. `tests/Unit` stays framework-free (for the rotation engine), and `tests/Feature` uses TestCase with RefreshDatabase. Tests run on SQLite in-memory, and a MySQL CI job is added in P1.9. Pint uses the `laravel` preset. Larastan runs at PHPStan **level 8**. Always run tests with `composer test`, which clears cached config. |
+| Testing and lint | Pest 4. `tests/Unit` stays framework-free (for the rotation engine), and `tests/Feature` uses TestCase with RefreshDatabase. Tests run on SQLite in-memory, and a MySQL CI job is added in P1.9. Pint uses the `laravel` preset. Larastan runs at PHPStan **level 8**. Always run tests with `composer test`, which clears cached config. MySQL runs use `composer test:mysql`, which calls `vendor/bin/pest` directly. `php artisan test` unsets every var named in `.env`, so it silently drops the `DB_*` overrides and falls back to SQLite. The guard test `DatabaseDriverTest` (active when `REQUIRE_MYSQL=1`) asserts the mysql driver and InnoDB tables. CI uses MySQL **8.4 LTS**. |
 | Database engine | The MySQL connection is forced to InnoDB in `config/database.php`, because the local server defaults to MyISAM. |
 | Dev tooling | `laravel/pao` (dev-only) is kept from the kit. It compacts test and lint output for AI agents, and `PAO_DISABLE=1` gives full output. `laravel/chisel` was removed because it's only used at install time. |
 
@@ -44,7 +44,9 @@ A free, self-hosted Laravel app modelled on PickleQ's **Venue Pro** plan: open-p
 
 ```
 users ─< club_user (role: owner | staff) >─ clubs
+users:            + current_club_id? (last club used; for redirect after login)
 clubs:            name, slug, dupr_club_id, star_bands(json), default_courts
+club_invitations: club_id, email, role, token_hash, invited_by, expires_at, accepted_at
 players:          club_id, name, dupr_id?, dupr_rating?, stars, rating_source(manual|dupr), active
 play_sessions:    club_id, name, date, courts, scoring(json), status(draft|live|ended), checkin_token
 session_players:  play_session_id, player_id, status(waiting|playing|break|left), checked_in_at,
@@ -60,6 +62,20 @@ dupr_exports:     play_session_id, user_id, match_count, file_path
 **Naming (decided in Phase 0 review):**
 - Model `PlaySession` (never `Session`, which clashes with the facade). Foreign keys are `play_session_id`, not `session_id`.
 - Model `GameMatch` with `protected $table = 'matches'`. `match` is a reserved word in PHP 8, so a `Match` class is a parse error. Relation names can still read naturally, e.g. `$session->matches()`.
+
+**Phase 1 rules (decided at Phase 1 start; change here first if needed):**
+- **Club routing:** staff pages live under `/clubs/{club:slug}/...`. Slugs are globally unique, generated from the name, and the owner can edit them. The slugs `create` and `new` are reserved because they would collide with `/clubs/create`. Middleware checks membership. Non-members get **404**, so club existence isn't revealed. Club-owned data is always queried through the route-bound club (`$club->players()`), never through a request `club_id`.
+- **Current club:** `users.current_club_id` stores the last club visited. `/dashboard` redirects there, or to "create your first club" if the user has none. The sidebar has a club switcher.
+- **Roles:** `owner` can do everything, including club settings, star bands, invites, members and deleting the club. `staff` can manage players (and sessions later). A club can have several owners, but the last owner can't leave or be demoted. Any member can leave a club themselves. Creating a club makes you its owner. Only verified users can create clubs.
+- **Invites:** owners invite by email and choose a role. The invite is a single-use token stored as a hash and expires in 7 days. The link works for a logged-in user whose email matches the invite. Anyone else logs in or registers first with that email, then accepts. Owners can resend or revoke pending invites.
+- **DUPR IDs:** a player ID is 6 alphanumeric characters (e.g. `8DPLX8`). It's stored uppercase, is optional, and is unique within a club. A club's `dupr_club_id` is a 10-digit number. The DUPR rating is `decimal(5,3)` with a range of 2.000–8.000.
+- **Stars:** `star_bands` is stored as 5 ascending thresholds, defaulting to `[2.50, 3.00, 3.50, 4.00, 4.50]`. A player with a rating defaults to `rating_source = dupr`, and stars are derived from the bands. Staff can switch any player to `manual` to override. Unrated players are always `manual`. Editing the bands recomputes stars for every `dupr`-sourced player in the club.
+- **Players aren't hard-deleted.** Staff set them inactive, which keeps the match history for later phases.
+- **Roster import:** UTF-8 CSV with a header row `name,dupr_id,dupr_rating`. The header is matched case-insensitively, and only `name` is required. Limits are 1 MB and 1,000 rows. A row matches an existing player by DUPR ID first, then by case-insensitive name. Matches are updated and new rows are created. **A name match never overwrites a different existing DUPR ID**, because it could be a different person with the same name. That row becomes an error. A blank cell never clears an existing value. Staff see a preview (create / update / skip / error per row) before confirming.
+- **Invite accepted by an existing member:** the invite is consumed, but the member's current role is **never changed**. Role changes only happen on the members page. Club and user names are Markdown-escaped in invite emails.
+- **Import preview storage:** the preview is kept on the server in the cache, keyed by user, club and a random id, with a 30-minute TTL. It's never put in the Livewire snapshot. The file is read only up to the row limit, so oversized files are rejected early.
+- **Invite revoke** deletes the invitation row. Invite throttling is enforced in `InvitationService`, so every caller (Livewire or HTTP) is covered.
+- **Signup abuse (P1.8):** registration is limited to 5 POSTs per hour per IP. The registration form has a honeypot field. Email verification is required before any club access. A user can't **create** a club while already owning `pickleq.max_owned_clubs` clubs (default 5). The cap is checked only at creation, so being invited or promoted to owner is never blocked. We accept the workaround (promote a second verified account, then step down) because it's costly for spammers. Invites are limited to 20 per hour per club.
 
 ---
 
@@ -116,20 +132,22 @@ Legend: `[ ]` todo · `[x]` done. Each item has an ID (e.g. `P2.3`) — referenc
 - [x] **P0.1** Scaffold Laravel app (latest) with Livewire starter kit, Tailwind, MySQL config
 - [x] **P0.2** Install and configure Laravel Reverb + Echo (local)
 - [x] **P0.3** Configure Pest, Laravel Pint, Larastan; add `composer test` / `composer lint` scripts
-- [ ] **P0.4** Set up `.env.example`, README dev-setup section, GitHub Actions CI (lint + tests). *Split during review:*
+- [x] **P0.4** Set up `.env.example`, README dev-setup section, GitHub Actions CI (lint + tests). *Split during review:*
   - [x] **P0.4a** `.env.example`, README dev setup, `.github/workflows/ci.yml` written, reviewed, and passing locally
-  - [ ] **P0.4b** First green GitHub Actions run on the pushed branch. This also confirms the hand-patched `package-lock.json` Linux binaries (`lightningcss-linux-x64-gnu`, npm/cli#4828) work on Ubuntu.
+  - [x] **P0.4b** *(verified: CI run on `main` @ `5ab0dcc` succeeded, 2026-10-05)* First green GitHub Actions run on the pushed branch. This also confirms the hand-patched `package-lock.json` Linux binaries (`lightningcss-linux-x64-gnu`, npm/cli#4828) work on Ubuntu.
 
 ### Phase 1 — Foundation
-- [ ] **P1.1** Auth: registration, login, email verification, password reset
-- [ ] **P1.2** Clubs: create / edit / slug; `club_user` with owner & staff roles; policies
-- [ ] **P1.3** Club switcher and club-scoped routing (every query scoped to the current club)
-- [ ] **P1.4** Staff invites (owner invites by email, assigns role)
-- [ ] **P1.5** Players CRUD: name, DUPR ID (format validation), DUPR rating, stars, active flag
-- [ ] **P1.6** Star bands: per-club config, rating → stars service, manual override for unrated
-- [ ] **P1.7** Roster CSV import (name, DUPR ID, rating)
-- [ ] **P1.8** Rate limiting and abuse guards on signup
-- [ ] **P1.9** CI job that runs migrations and the test suite against a MySQL 8 service. SQLite ignores `lockForUpdate()` and has different JSON and engine behaviour. Must land before P2.5/P2.7, which rely on row locks.
+- [x] **P1.1** Auth: registration, login, email verification, password reset
+- [x] **P1.2** Clubs: create / edit / slug; `club_user` with owner & staff roles; policies
+- [x] **P1.3** Club switcher and club-scoped routing (every query scoped to the current club)
+- [x] **P1.4** Staff invites (owner invites by email, assigns role)
+- [x] **P1.5** Players CRUD: name, DUPR ID (format validation), DUPR rating, stars, active flag
+- [x] **P1.6** Star bands: per-club config, rating → stars service, manual override for unrated
+- [x] **P1.7** Roster CSV import (name, DUPR ID, rating)
+- [x] **P1.8** Rate limiting and abuse guards on signup
+- [ ] **P1.9** CI job that runs migrations and the test suite against a MySQL 8 service. SQLite ignores `lockForUpdate()` and has different JSON and engine behaviour. Must land before P2.5/P2.7, which rely on row locks. *Split during review:*
+  - [x] **P1.9a** `tests-mysql` job (MySQL 8.4, migrate/rollback/migrate, `composer test:mysql`, `REQUIRE_MYSQL` guard) written, reviewed, and passing against local MySQL
+  - [ ] **P1.9b** First green `tests-mysql` run on GitHub Actions for the pushed branch
 
 ### Phase 2 — Session engine
 - [ ] **P2.1** Play sessions: create, courts, scoring config (default: 1 game to 11, side-out), start / end
@@ -186,4 +204,7 @@ Legend: `[ ]` todo · `[x]` done. Each item has an ID (e.g. `P2.3`) — referenc
 - **Per-club players** → the same person in two clubs is two records; stats don't combine across clubs. Changing this later needs a data migration.
 - **DUPR template exactness** → never guess the header row; always build from the committed official template.
 - **Reverb hardening (P6.3):** `config/reverb.php` has `allowed_origins => ['*']` and binds `0.0.0.0`. In production, restrict origins to `APP_URL` and bind to 127.0.0.1 behind Nginx. `VITE_REVERB_*` values are baked in at build time, so the production build needs the real `.env`. Echo currently connects on every page; consider loading it only on live pages.
+- **Proxy IPs (P6.2):** the signup throttle is per IP. Behind Nginx or a load balancer, configure TrustProxies. Otherwise every visitor shares one IP and the whole site gets only 5 signups an hour.
+- **Larastan doesn't analyse `⚡*.blade.php` single-file components.** Their PHP runs without level 8 checks. Look at adding those paths, or extracting logic, before Phase 2 adds heavier board components.
+- **Livewire `memo.path` after a slug rename:** other open tabs get a 404 on their next action. Data stays safe. Keep this in mind for the Phase 2 board, which stays open for hours.
 - **Windows-generated `package-lock.json`** can drop nested Linux native binaries (npm/cli#4828). If `npm ci` or `npm run build` fails on Linux with a missing lightningcss binding, regenerate the lock on Linux.

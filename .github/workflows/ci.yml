@@ -106,3 +106,97 @@ jobs:
       # phpunit.xml forces SQLite in-memory, so no MySQL service is needed.
       - name: Run tests
         run: composer test
+
+  tests-mysql:
+    name: Tests (Pest on MySQL 8.4)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      # 8.4 is the current LTS (8.0 reached end of life in April 2026), and the
+      # closest match to what the production server will run.
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: root-ci-only
+          MYSQL_DATABASE: pickleq_test
+          MYSQL_USER: pickleq
+          MYSQL_PASSWORD: pickleq-ci-only
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot-ci-only"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    # Real environment variables beat .env (Dotenv is immutable) and the <env>
+    # entries in phpunit.xml (no force="true", so PHPUnit leaves set variables alone).
+    # BUT `php artisan test` (used by `composer test`) unsets every variable named in
+    # .env before running, so the SQLite defaults would win. This job therefore runs
+    # `composer test:mysql`, which calls Pest directly. REQUIRE_MYSQL turns on a guard
+    # test that fails if the suite is not really running on MySQL/InnoDB.
+    env:
+      DB_CONNECTION: mysql
+      DB_HOST: 127.0.0.1
+      DB_PORT: 3306
+      DB_DATABASE: pickleq_test
+      DB_USERNAME: pickleq
+      DB_PASSWORD: pickleq-ci-only
+      REQUIRE_MYSQL: '1'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
+        with:
+          php-version: '8.3'
+          extensions: mbstring, intl, pdo_sqlite, sqlite3, pdo_mysql, bcmath, gd, zip, fileinfo
+          tools: composer:v2
+          coverage: none
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Get Composer cache directory
+        id: composer-cache
+        run: echo "dir=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Composer dependencies
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: composer-${{ runner.os }}-${{ hashFiles('composer.lock') }}
+          restore-keys: composer-${{ runner.os }}-
+
+      - name: Install Composer dependencies
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Build assets (Vite manifest is needed by feature tests that render views)
+        run: npm run build
+
+      - name: Prepare environment
+        run: |
+          cp .env.example .env
+          php artisan key:generate
+
+      # Smoke check: migrations must apply cleanly on a real MySQL server.
+      - name: Run migrations
+        run: php artisan migrate --force
+
+      # Exercise every down() method (e.g. dropConstrainedForeignId) on MySQL.
+      - name: Roll back migrations
+        run: php artisan migrate:rollback --force
+
+      - name: Re-run migrations
+        run: php artisan migrate --force
+
+      - name: Run tests on MySQL
+        run: composer test:mysql

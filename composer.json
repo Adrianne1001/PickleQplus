@@ -70,8 +70,14 @@
             "@types:check"
         ],
         "test": [
+            "Composer\\Config::disableProcessTimeout",
             "@php artisan config:clear --ansi",
             "@php artisan test"
+        ],
+        "test:mysql": [
+            "Composer\\Config::disableProcessTimeout",
+            "@php artisan config:clear --ansi",
+            "@php vendor/bin/pest"
         ],
         "ci:check": [
             "Composer\\Config::disableProcessTimeout",

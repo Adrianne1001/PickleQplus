@@ -54,6 +54,16 @@
                 viewable
             />
 
+            <!-- Honeypot: visually hidden, not type=hidden. Humans leave it empty. -->
+            <div aria-hidden="true" style="position:absolute;left:-10000px;width:1px;height:1px;overflow:hidden;">
+                <label for="homepage_url">{{ __('Leave this field empty') }}</label>
+                <input type="text" id="homepage_url" name="homepage_url" value="" autocomplete="off" tabindex="-1">
+            </div>
+
+            @error('homepage_url')
+                <p class="text-sm text-red-600" role="alert">{{ $message }}</p>
+            @enderror
+
             <div class="flex items-center justify-end">
                 <flux:button type="submit" variant="primary" class="w-full" data-test="register-user-button">
                     {{ __('Create account') }}

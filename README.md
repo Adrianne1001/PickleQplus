@@ -82,6 +82,22 @@ Always run tests through `composer test`, not bare `php artisan test` or `vendor
 
 `laravel/pao` is a dev-only package that compacts test and lint output when an AI agent runs them. Set `PAO_DISABLE=1` (for example `PAO_DISABLE=1 composer test`) to get the normal full output.
 
+To run the suite against MySQL (what the `tests-mysql` CI job does), create an empty database and set the `DB_*` variables in your shell. Use `composer test:mysql`, not `composer test`: `php artisan test` unsets every variable named in `.env`, so the overrides would be ignored and SQLite used. `REQUIRE_MYSQL=1` enables a guard test that fails if the run is not on MySQL/InnoDB.
+
+**Warning:** the tests use `RefreshDatabase`, which **wipes every table in the target database**. Point them at a throwaway database (such as `pickleq_test`), never at your dev `pickleq` database.
+
+Bash (Linux, macOS, Git Bash):
+
+```bash
+DB_CONNECTION=mysql DB_DATABASE=pickleq_test DB_USERNAME=root DB_PASSWORD=secret REQUIRE_MYSQL=1 composer test:mysql
+```
+
+PowerShell (Windows):
+
+```powershell
+$env:DB_CONNECTION='mysql'; $env:DB_DATABASE='pickleq_test'; $env:DB_USERNAME='root'; $env:DB_PASSWORD='secret'; $env:REQUIRE_MYSQL='1'; composer test:mysql
+```
+
 Tests need the Vite manifest for views that render assets, so run `npm run build` once before the first `composer test` on a fresh clone.
 
 CI (`.github/workflows/ci.yml`) runs `composer lint` and `composer test` on pushes to `main`, on every pull request, and on manual dispatch (`workflow_dispatch`).
