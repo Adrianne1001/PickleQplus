@@ -3,6 +3,7 @@
 namespace Database\Factories;
 
 use App\Enums\ClubRole;
+use App\Enums\LateArrivalPolicy;
 use App\Models\Club;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\Factory;
@@ -26,6 +27,8 @@ class ClubFactory extends Factory
             'dupr_club_id' => null,
             'star_bands' => config('pickleq.star_bands'),
             'default_courts' => 4,
+            'late_arrival_policy' => LateArrivalPolicy::Minimum,
+            'allow_concurrent_sessions' => false,
         ];
     }
 

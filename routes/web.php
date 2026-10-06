@@ -2,6 +2,9 @@
 
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\InvitationAcceptController;
+use App\Livewire\Sessions\Form as SessionForm;
+use App\Livewire\Sessions\Index as SessionsIndex;
+use App\Livewire\Sessions\Show as SessionShow;
 use Illuminate\Support\Facades\Route;
 
 Route::view('/', 'welcome')->name('home');
@@ -31,6 +34,12 @@ Route::middleware(['auth', 'verified'])->group(function () {
             Route::livewire('settings', 'pages::clubs.settings')->name('clubs.settings');
             Route::livewire('members', 'pages::clubs.members')->name('clubs.members');
             Route::livewire('players', 'pages::clubs.players')->name('clubs.players.index');
+
+            // Sessions ("create" is declared before {session}).
+            Route::livewire('sessions', SessionsIndex::class)->name('clubs.sessions.index');
+            Route::livewire('sessions/create', SessionForm::class)->name('clubs.sessions.create');
+            Route::livewire('sessions/{session}', SessionShow::class)->name('clubs.sessions.show');
+            Route::livewire('sessions/{session}/edit', SessionForm::class)->name('clubs.sessions.edit');
         });
 });
 

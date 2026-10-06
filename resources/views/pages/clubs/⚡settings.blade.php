@@ -1,6 +1,7 @@
 <?php
 
 use App\Domain\Stars\StarRating;
+use App\Enums\LateArrivalPolicy;
 use App\Livewire\Inputs\ClubInput;
 use App\Models\Club;
 use App\Services\ClubService;
@@ -22,6 +23,9 @@ new #[Title('Club settings')] class extends Component {
     /** @var array<int, string> */
     public array $star_bands = [];
 
+    public string $late_arrival_policy = 'minimum';
+    public bool $allow_concurrent_sessions = false;
+
     public string $confirmName = '';
 
     public function mount(Club $club): void
@@ -38,6 +42,8 @@ new #[Title('Club settings')] class extends Component {
         $this->slug = $this->club->slug;
         $this->dupr_club_id = $this->club->dupr_club_id ?? '';
         $this->default_courts = (string) $this->club->default_courts;
+        $this->late_arrival_policy = $this->club->late_arrival_policy->value;
+        $this->allow_concurrent_sessions = $this->club->allow_concurrent_sessions;
         $this->star_bands = array_map(
             fn ($b): string => number_format((float) $b, 2, '.', ''),
             array_values($this->club->star_bands),
@@ -78,6 +84,20 @@ new #[Title('Club settings')] class extends Component {
         $this->fillFromClub();
 
         Flux::toast(variant: 'success', text: __('Star bands saved. Stars were recomputed for DUPR-rated players.'));
+    }
+
+    public function saveSessionSettings(ClubService $clubs): void
+    {
+        $this->authorize('manageSettings', $this->club);
+
+        $clubs->updateSessionSettings($this->club, [
+            'late_arrival_policy' => $this->late_arrival_policy,
+            'allow_concurrent_sessions' => $this->allow_concurrent_sessions,
+        ]);
+
+        $this->fillFromClub();
+
+        Flux::toast(variant: 'success', text: __('Session settings saved.'));
     }
 
     public function resetStarBands(): void
@@ -246,6 +266,29 @@ new #[Title('Club settings')] class extends Component {
             <flux:button variant="primary" type="submit" data-test="save-star-bands-button">{{ __('Save star bands') }}</flux:button>
             <flux:button type="button" variant="ghost" wire:click="resetStarBands">{{ __('Reset to defaults') }}</flux:button>
         </div>
+    </form>
+
+    <flux:separator />
+
+    {{-- Sessions (P2.1b) --}}
+    <form wire:submit="saveSessionSettings" class="space-y-6" data-test="session-settings-form">
+        <flux:heading size="lg">{{ __('Sessions') }}</flux:heading>
+
+        <flux:radio.group wire:model="late_arrival_policy" :label="__('Late arrivals and players returning from break')" data-test="late-arrival-policy">
+            <flux:radio value="{{ LateArrivalPolicy::Minimum->value }}" :label="__('Join at current minimum')" :description="__('Line up with whoever has played least, so latecomers are neither stuck at the back nor jump ahead.')" />
+            <flux:radio value="{{ LateArrivalPolicy::Front->value }}" :label="__('Front of queue')" :description="__('No credit: they have played the fewest games, so they are first in line.')" />
+            <flux:radio value="{{ LateArrivalPolicy::Back->value }}" :label="__('Back of queue')" :description="__('They line up behind everyone who is already waiting or playing.')" />
+        </flux:radio.group>
+        <flux:error name="late_arrival_policy" />
+
+        <flux:field variant="inline">
+            <flux:checkbox wire:model="allow_concurrent_sessions" data-test="allow-concurrent" />
+            <flux:label>{{ __('Allow several live sessions at once') }}</flux:label>
+            <flux:description>{{ __('Off by default. A player can still be checked in to only one live session at a time.') }}</flux:description>
+        </flux:field>
+        <flux:error name="allow_concurrent_sessions" />
+
+        <flux:button variant="primary" type="submit" data-test="save-session-settings-button">{{ __('Save session settings') }}</flux:button>
     </form>
 
     <flux:separator />

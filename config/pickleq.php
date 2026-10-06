@@ -51,4 +51,22 @@ return [
     */
     'import_preview_ttl_minutes' => 30,
 
+    /*
+    | Balanced rotation engine (PLAN.md section 3). Lowest total cost wins:
+    |   |stars(A) - stars(B)| * star_balance + repeat partners * repeat_partner
+    |   + repeat opponents * repeat_opponent + skipped priority ranks * skipped_priority
+    | One star of imbalance outweighs skipping one queue rank; repeating a
+    | partner costs more than repeating an opponent. `window` is how many of
+    | the highest-priority waiting players are searched (minimum 4).
+    | `avg_match_minutes` is the fallback match length for wait estimates.
+    */
+    'rotation' => [
+        'star_balance' => 3,
+        'repeat_partner' => 4,
+        'repeat_opponent' => 1.5,
+        'skipped_priority' => 2,
+        'window' => 8,
+        'avg_match_minutes' => 15,
+    ],
+
 ];

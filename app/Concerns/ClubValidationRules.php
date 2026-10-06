@@ -2,6 +2,7 @@
 
 namespace App\Concerns;
 
+use App\Enums\LateArrivalPolicy;
 use App\Models\Club;
 use App\Rules\ClubSlug;
 use App\Rules\StarBands;
@@ -47,6 +48,19 @@ trait ClubValidationRules
         return [
             'star_bands' => ['required', 'array', new StarBands],
             'star_bands.*' => ['numeric'],
+        ];
+    }
+
+    /**
+     * Owner-only session settings (see ClubService::updateSessionSettings).
+     *
+     * @return array<string, array<int, mixed>>
+     */
+    protected function sessionSettingsRules(): array
+    {
+        return [
+            'late_arrival_policy' => ['required', Rule::enum(LateArrivalPolicy::class)],
+            'allow_concurrent_sessions' => ['required', 'boolean'],
         ];
     }
 

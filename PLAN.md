@@ -45,13 +45,15 @@ A free, self-hosted Laravel app modelled on PickleQ's **Venue Pro** plan: open-p
 ```
 users ─< club_user (role: owner | staff) >─ clubs
 users:            + current_club_id? (last club used; for redirect after login)
-clubs:            name, slug, dupr_club_id, star_bands(json), default_courts
+clubs:            name, slug, dupr_club_id, star_bands(json), default_courts,
+                  late_arrival_policy(minimum|front|back), allow_concurrent_sessions
 club_invitations: club_id, email, role, token_hash, invited_by, expires_at, accepted_at
 players:          club_id, name, dupr_id?, dupr_rating?, stars, rating_source(manual|dupr), active
-play_sessions:    club_id, name, date, courts, scoring(json), status(draft|live|ended), checkin_token
+play_sessions:    club_id, name, date, courts, scoring(json), status(draft|live|ended), checkin_token?,
+                  up_next_count, auto_fill, started_at, ended_at
 session_players:  play_session_id, player_id, status(waiting|playing|break|left), checked_in_at,
-                  games_played, last_finished_at
-matches:          play_session_id, court_no, status(staged|playing|done|void), team_a_score, team_b_score,
+                  games_played, games_credit, queued_at, last_finished_at      unique(play_session_id, player_id)
+matches:          play_session_id, court_no?, status(staged|playing|done|void), team_a_score, team_b_score,
                   started_at, finished_at, dupr_eligible, dupr_exported_at, dupr_synced_at, dupr_match_ref
 match_players:    match_id, player_id, team(A|B), slot(1|2)
 dupr_exports:     play_session_id, user_id, match_count, file_path
@@ -77,6 +79,29 @@ dupr_exports:     play_session_id, user_id, match_count, file_path
 - **Invite revoke** deletes the invitation row. Invite throttling is enforced in `InvitationService`, so every caller (Livewire or HTTP) is covered.
 - **Signup abuse (P1.8):** registration is limited to 5 POSTs per hour per IP. The registration form has a honeypot field. Email verification is required before any club access. A user can't **create** a club while already owning `pickleq.max_owned_clubs` clubs (default 5). The cap is checked only at creation, so being invited or promoted to owner is never blocked. We accept the workaround (promote a second verified account, then step down) because it's costly for spammers. Invites are limited to 20 per hour per club.
 
+**Phase 2 rules (decided at Phase 2 start; change here first if needed):**
+- **Who:** owners and staff can create, edit, start and end sessions and run the board. Sessions live under `/clubs/{club:slug}/sessions/...` and use the Phase 1 club scoping.
+- **Lifecycle:** `draft → live → ended`. `ended` is final. Only drafts can be deleted. Players can be checked in during `draft` or `live`. Matches can be staged or started only while `live`. Ending a session is blocked while a match is `playing`. Staged matches are voided automatically on end.
+- **Concurrent sessions:** club setting `allow_concurrent_sessions` (owner, checkbox, **default off**). When it's off, starting a session is blocked while another session in the club is live. When it's on, a player can still be checked into only one live session at a time.
+- **Session settings:** `courts` 1–50, defaulting to the club's `default_courts`. Courts can change while live, but a court with a playing match can't be removed. `up_next_count` 1–3, **default 1**. `auto_fill` **default off**. `scoring` defaults to `{"type":"side_out","games":1,"to":11,"win_by":2}`. `to` may be 11, 15 or 21, and `win_by` 1 or 2.
+- **Valid score:** no ties. The winner has at least `to` points and wins by at least `win_by`. If the winner has more than `to`, the margin must be exactly `win_by`. So for to 11, win by 2: 11–9 and 12–10 are valid, while 11–10, 13–10 and 10–8 aren't.
+- **Queue priority inputs:** `effective_games = games_played + games_credit`, then `queued_at`, the time the wait clock started (check-in, return from break, or match finish). `games_played` stays the real count shown on the board. `games_credit` exists only for queue priority.
+- **Late arrival / return from break:** club setting `late_arrival_policy` (owner):
+  - `minimum` (**default**): credit up to the lowest `effective_games` among the other waiting and playing players.
+  - `front`: no credit.
+  - `back`: credit up to the highest `effective_games`.
+
+  Credit only ever raises. It never lowers an existing credit. With nobody else active, the credit is 0.
+- **Staging:** the engine is called once per open Up Next slot. Players already in a staged or playing match are excluded. Staged matches have no court. Starting one assigns the lowest free court number. While the session is live, empty Up Next slots are **always** refilled after every change, whether or not `auto_fill` is on. `auto_fill` only controls starting: when it's on, every free court immediately starts the oldest staged match. Lowering `up_next_count` voids the newest surplus staged matches. Staff can also **re-roll** a staged match. That voids it and stages the lowest-cost group that **isn't the exact same four**: the engine is run once with each old player left out, and the best result is taken. The same four come back only if no other group is possible.
+- **Leaving a staged match:** if a staged player checks out or goes on break, the staged match is voided and the slot is re-staged. Checking out or breaking a **playing** player is blocked. Swap them out first.
+- **Swap / remove (P2.7):** you can swap a player in a staged or playing match for a waiting player who isn't in another match. Removing a player fills the slot with the waiting player the engine ranks best for it. The removed player goes back to `waiting` (or `break`/`left` if chosen). No game is counted for them.
+- **Void:** staged → players freed. Playing → players back to `waiting`, no games counted, court freed. Done → `games_played` is decremented for its players, and the match is excluded from stats. A match with `dupr_exported_at` set can't be voided.
+- **Finish / undo / edit:** finishing records the score, increments `games_played`, sets `last_finished_at` and `queued_at`, and frees the court. **Undo last result** reverts the session's most recent `done` match to `playing`. It's allowed only if that court is free and none of its 4 players is in a playing match, on a break, or has left. If any of them has already been re-staged into Up Next, that staged match is voided and Up Next refilled afterwards. With `auto_fill` on, the court is usually taken at once, so staff use edit score. Otherwise staff use **edit score**, which is allowed on any `done` match until it's DUPR-exported.
+- **Repeat history** for the engine counts the session's non-void matches (staged, playing and done).
+- **Concurrency:** every state change to a session (check-in, staging, start, finish, swap, void, undo, settings) runs in one DB transaction that first locks the `play_sessions` row (`lockForUpdate`). Starting a session also locks the club row. Checking a player into a live session also locks the player row. After commit, services dispatch domain events. They become broadcast events in P3.1.
+- **Wait estimate (P2.8):** a pure `WaitEstimator`. Inputs are queue position, courts, staged count, elapsed time of playing matches, and the average duration of the session's last 10 done matches (default 15 min from config). The output is minutes.
+- **Livewire structure:** Phase 2 components that contain logic (session pages and the board) are **class-based components in `app/Livewire`**, so Larastan level 8 analyses them. Thin pages may stay as `⚡` single-file components.
+
 ---
 
 ## 3. Balanced rotation engine
@@ -88,6 +113,34 @@ dupr_exports:     play_session_id, user_id, match_count, file_path
 4. **Stage** the winner as "Up Next"; when a court frees, the organizer taps to start (or auto-fill).
 
 Pure PHP service — no DB or UI dependency — so it is fully unit-testable. Weights live in config.
+
+**Details (decided at Phase 2 start):**
+- **Location:** `app/Domain/Rotation`. Inputs are plain value objects:
+  - candidates: id, stars, effective_games, queued_at
+  - session pair history: partner counts and opponent counts per player pair
+  - weights and window size
+
+  The output is the chosen 4 as teams A/B with a cost breakdown, or `null` if fewer than 4 candidates.
+- **Priority sort:** `effective_games` asc → `queued_at` asc → player id asc. The sort is fully deterministic, with no randomness.
+- **Window:** the top `rotation.window` players (config, default 8, min 4). C(8,4) × 3 = 210 evaluations.
+- **Cost terms:**
+  - `stars(X)` is the sum of team X's stars.
+  - The repeat partner term sums the prior partner counts of both pairs.
+  - The repeat opponent term sums the prior opponent counts of the 4 cross pairs.
+  - `skipped-priority = Σ(priority rank of the chosen 4) − (0+1+2+3)`.
+- **Ties:** lowest skipped-priority wins, then the lexicographically smallest sorted id list.
+- **Config:** weights and the window go in `config/pickleq.php` under `rotation`. Defaults chosen in P2.3:
+
+  | Key | Default | Why |
+  |---|---|---|
+  | `star_balance` | 3 | One star of team-sum imbalance outweighs skipping one queue rank. |
+  | `repeat_partner` | 4 | A repeat partner is worse than a repeat opponent or one star of imbalance. |
+  | `repeat_opponent` | 1.5 | A mild nudge, because opponents repeat naturally in small pools. |
+  | `skipped_priority` | 2 | Skipping the front player (4 ranks, 8 points) needs more than 2 stars of imbalance to pay off. Raise it for a stricter queue. |
+  | `window` | 8 | |
+  | `avg_match_minutes` | 15 | Fallback for wait estimates. |
+
+- **API:** `BalancedRotationEngine::pickMatch()` and `pickReplacement()` (used by P2.7 remove). The tie order after cost is lowest skipped-priority, then the smallest sorted id list, then the split order. Costs are compared with a 1e-9 epsilon.
 
 ---
 
@@ -145,19 +198,23 @@ Legend: `[ ]` todo · `[x]` done. Each item has an ID (e.g. `P2.3`) — referenc
 - [x] **P1.6** Star bands: per-club config, rating → stars service, manual override for unrated
 - [x] **P1.7** Roster CSV import (name, DUPR ID, rating)
 - [x] **P1.8** Rate limiting and abuse guards on signup
-- [ ] **P1.9** CI job that runs migrations and the test suite against a MySQL 8 service. SQLite ignores `lockForUpdate()` and has different JSON and engine behaviour. Must land before P2.5/P2.7, which rely on row locks. *Split during review:*
+- [x] **P1.9** CI job that runs migrations and the test suite against a MySQL 8 service. SQLite ignores `lockForUpdate()` and has different JSON and engine behaviour. Must land before P2.5/P2.7, which rely on row locks. *Split during review:*
   - [x] **P1.9a** `tests-mysql` job (MySQL 8.4, migrate/rollback/migrate, `composer test:mysql`, `REQUIRE_MYSQL` guard) written, reviewed, and passing against local MySQL
-  - [ ] **P1.9b** First green `tests-mysql` run on GitHub Actions for the pushed branch
+  - [x] **P1.9b** *(verified: CI run 37354407656 on `main` @ `5c7a869` succeeded, including Tests (Pest on MySQL 8.4), 2026-10-06)* First green `tests-mysql` run on GitHub Actions for the pushed branch
 
 ### Phase 2 — Session engine
-- [ ] **P2.1** Play sessions: create, courts, scoring config (default: 1 game to 11, side-out), start / end
-- [ ] **P2.2** Manual check-in, check-out, break, late arrival
-- [ ] **P2.3** Balanced rotation engine (pure PHP service) with config weights
-- [ ] **P2.4** Rotation engine unit tests: fairness, repeat-partner avoidance, star balance, edge cases (<4 players, odd counts)
-- [ ] **P2.5** Staging "Up Next", start match on free court, auto-fill option
-- [ ] **P2.6** Score entry (validates side-out to-11 rules), finish match, undo last result
-- [ ] **P2.7** Swap / remove a player from a staged or live match; void a match
-- [ ] **P2.8** Organizer board (Livewire): courts, Up Next, waiting list with wait estimates
+- [x] **P2.1** Play sessions: create, courts, scoring config (default: 1 game to 11, side-out), start / end *Split at Phase 2 start:*
+  - [x] **P2.1a** Backend: migrations, models, policy, `PlaySessionService`, club session settings
+  - [x] **P2.1b** UI: sessions list, create/edit, start/end/delete, club settings fields
+- [x] **P2.2** Manual check-in, check-out, break, late arrival *Split at Phase 2 start:*
+  - [x] **P2.2a** Backend: `CheckInService` with late-arrival credit
+  - [x] **P2.2b** UI: check-in panel on the session page
+- [x] **P2.3** Balanced rotation engine (pure PHP service) with config weights
+- [x] **P2.4** Rotation engine unit tests: fairness, repeat-partner avoidance, star balance, edge cases (<4 players, odd counts)
+- [x] **P2.5** Staging "Up Next", start match on free court, auto-fill option
+- [x] **P2.6** Score entry (validates side-out to-11 rules), finish match, undo last result
+- [x] **P2.7** Swap / remove a player from a staged or live match; void a match
+- [x] **P2.8** Organizer board (Livewire): courts, Up Next, waiting list with wait estimates
 
 ### Phase 3 — Live views
 - [ ] **P3.1** Broadcast events (court/queue/match changes) over Reverb; public channels per session
@@ -205,6 +262,7 @@ Legend: `[ ]` todo · `[x]` done. Each item has an ID (e.g. `P2.3`) — referenc
 - **DUPR template exactness** → never guess the header row; always build from the committed official template.
 - **Reverb hardening (P6.3):** `config/reverb.php` has `allowed_origins => ['*']` and binds `0.0.0.0`. In production, restrict origins to `APP_URL` and bind to 127.0.0.1 behind Nginx. `VITE_REVERB_*` values are baked in at build time, so the production build needs the real `.env`. Echo currently connects on every page; consider loading it only on live pages.
 - **Proxy IPs (P6.2):** the signup throttle is per IP. Behind Nginx or a load balancer, configure TrustProxies. Otherwise every visitor shares one IP and the whole site gets only 5 signups an hour.
-- **Larastan doesn't analyse `⚡*.blade.php` single-file components.** Their PHP runs without level 8 checks. Look at adding those paths, or extracting logic, before Phase 2 adds heavier board components.
+- **Larastan doesn't analyse `⚡*.blade.php` single-file components.** Their PHP runs without level 8 checks. *Resolved for Phase 2:* components with logic are class-based in `app/Livewire` (see Phase 2 rules). The existing Phase 1 SFCs are still unanalysed.
 - **Livewire `memo.path` after a slug rename:** other open tabs get a 404 on their next action. Data stays safe. Keep this in mind for the Phase 2 board, which stays open for hours.
 - **Windows-generated `package-lock.json`** can drop nested Linux native binaries (npm/cli#4828). If `npm ci` or `npm run build` fails on Linux with a missing lightningcss binding, regenerate the lock on Linux.
+- **Parallel test runs collide:** two `composer test` runs at the same time (e.g. two subagents) share the `livewire-tmp` upload folder, and the roster-import tests fail intermittently. Run the full suite from one place at a time. A failure seen only under parallel runs isn't a real regression.

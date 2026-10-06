@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Domain\Stars\StarRating;
 use App\Enums\ClubRole;
+use App\Enums\LateArrivalPolicy;
 use App\Enums\RatingSource;
 use App\Models\Club;
 use App\Models\ClubMembership;
@@ -12,7 +13,9 @@ use App\Models\User;
 use App\Rules\ClubSlug;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
 class ClubService
@@ -121,6 +124,39 @@ class ClubService
         } catch (UniqueConstraintViolationException) {
             throw ValidationException::withMessages(['slug' => 'That slug is already taken.']);
         }
+
+        return $club;
+    }
+
+    /**
+     * Owner-only session settings: late arrival policy and whether several
+     * sessions may be live at once. Only keys present in $data change. The
+     * club row is locked so a concurrent session start sees a consistent value.
+     *
+     * @param  array{late_arrival_policy?: LateArrivalPolicy|string, allow_concurrent_sessions?: bool}  $data
+     *
+     * @throws ValidationException
+     */
+    public function updateSessionSettings(Club $club, array $data): Club
+    {
+        $validated = Validator::make($data, [
+            'late_arrival_policy' => ['sometimes', 'required', Rule::enum(LateArrivalPolicy::class)],
+            'allow_concurrent_sessions' => ['sometimes', 'required', 'boolean'],
+        ])->validate();
+
+        DB::transaction(function () use ($club, $validated): void {
+            Club::query()->whereKey($club->id)->lockForUpdate()->firstOrFail();
+
+            if (array_key_exists('late_arrival_policy', $validated)) {
+                $policy = $validated['late_arrival_policy'];
+                $club->late_arrival_policy = $policy instanceof LateArrivalPolicy ? $policy : LateArrivalPolicy::from((string) $policy);
+            }
+            if (array_key_exists('allow_concurrent_sessions', $validated)) {
+                $club->allow_concurrent_sessions = (bool) $validated['allow_concurrent_sessions'];
+            }
+
+            $club->save();
+        });
 
         return $club;
     }
