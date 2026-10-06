@@ -32,6 +32,15 @@ trait PlayerValidationRules
 
         return [
             'name' => $updating ? ['sometimes', 'required', 'string', 'max:120'] : ['required', 'string', 'max:120'],
+            'nickname' => [
+                'sometimes',
+                'nullable',
+                'string',
+                'max:20',
+                fn (string $attribute, mixed $value, \Closure $fail) => is_string($value) && Player::nicknameTaken($club->id, trim($value), $player?->id)
+                    ? $fail('That nickname is already taken in this club.')
+                    : null,
+            ],
             'dupr_id' => [
                 'sometimes',
                 'nullable',

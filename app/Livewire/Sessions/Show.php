@@ -33,6 +33,28 @@ class Show extends Component
         $this->session = $session;
     }
 
+    /**
+     * Listen on this session's public channel so several staff devices stay in sync.
+     *
+     * @return array<string, string>
+     */
+    public function getListeners(): array
+    {
+        return [
+            'echo:play-session.'.$this->session->public_id.',.session.updated' => 'syncFromBroadcast',
+        ];
+    }
+
+    /**
+     * Refresh this page and every board panel. Also the 30s poll fallback.
+     * It only dispatches browser-side events, never a broadcast, so it can't loop.
+     */
+    public function syncFromBroadcast(): void
+    {
+        $this->session->refresh();
+        $this->dispatch('session-changed');
+    }
+
     public function start(PlaySessionService $sessions): void
     {
         $this->authorize('manage', $this->session);

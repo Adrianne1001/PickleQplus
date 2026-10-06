@@ -2,6 +2,9 @@
 
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\InvitationAcceptController;
+use App\Livewire\Public\CheckIn as PublicCheckIn;
+use App\Livewire\Public\Queue as PublicQueue;
+use App\Livewire\Public\Tv as PublicTv;
 use App\Livewire\Sessions\Form as SessionForm;
 use App\Livewire\Sessions\Index as SessionsIndex;
 use App\Livewire\Sessions\Show as SessionShow;
@@ -42,6 +45,17 @@ Route::middleware(['auth', 'verified'])->group(function () {
             Route::livewire('sessions/{session}/edit', SessionForm::class)->name('clubs.sessions.edit');
         });
 });
+
+// --- Phase 3 public pages (no auth; read-only except self check-in) ---
+Route::livewire('c/{club:slug}/s/{publicId}', PublicQueue::class)
+    ->where('publicId', '[a-z0-9]+')
+    ->name('public.queue');
+Route::livewire('c/{club:slug}/tv/{tvId}', PublicTv::class)
+    ->where('tvId', '[A-Za-z0-9]+')
+    ->name('public.tv');
+Route::livewire('checkin/{token}', PublicCheckIn::class)
+    ->where('token', '[A-Za-z0-9]+')
+    ->name('public.checkin');
 
 // --- P1.4 invitations ---
 // Public accept flow (outside the club group: the invitee is not a member yet).

@@ -5,3 +5,5 @@
  */
 
 import './echo';
+
+import './public-pages';

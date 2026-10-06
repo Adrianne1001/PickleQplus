@@ -8,13 +8,17 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Str;
 
 /**
  * @property int $id
  * @property int $club_id
+ * @property string|null $public_id
+ * @property string|null $tv_id
  * @property string $name
  * @property Carbon $date
  * @property int $courts
@@ -33,6 +37,85 @@ class PlaySession extends Model
 {
     /** @use HasFactory<PlaySessionFactory> */
     use HasFactory;
+
+    protected static function booted(): void
+    {
+        static::creating(function (PlaySession $session): void {
+            if ($session->public_id === null) {
+                do {
+                    $candidate = self::randomString(12);
+                } while (self::query()->where('public_id', $candidate)->exists());
+                $session->public_id = $candidate;
+            }
+
+            if ($session->tv_id === null) {
+                $session->tv_id = Str::random(32);
+            }
+
+            if ($session->checkin_token === null && $session->status !== SessionStatus::Ended) {
+                $session->checkin_token = self::newCheckinToken();
+            }
+        });
+    }
+
+    public static function newCheckinToken(): string
+    {
+        return Str::random(40);
+    }
+
+    private static function randomString(int $length): string
+    {
+        $alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789';
+        $out = '';
+        for ($i = 0; $i < $length; $i++) {
+            $out .= $alphabet[random_int(0, 35)];
+        }
+
+        return $out;
+    }
+
+    /**
+     * Resolve a session by its public id inside a club; null when the session
+     * belongs to another club or doesn't exist.
+     */
+    public static function findByPublicId(Club $club, string $publicId): ?self
+    {
+        return self::query()->where('club_id', $club->id)->where('public_id', $publicId)->first();
+    }
+
+    /**
+     * @throws ModelNotFoundException
+     */
+    public static function findByPublicIdOrFail(Club $club, string $publicId): self
+    {
+        return self::findByPublicId($club, $publicId) ?? throw (new ModelNotFoundException)->setModel(self::class);
+    }
+
+    public static function findByTvId(Club $club, string $tvId): ?self
+    {
+        return self::query()->where('club_id', $club->id)->where('tv_id', $tvId)->first();
+    }
+
+    /**
+     * @throws ModelNotFoundException
+     */
+    public static function findByTvIdOrFail(Club $club, string $tvId): self
+    {
+        return self::findByTvId($club, $tvId) ?? throw (new ModelNotFoundException)->setModel(self::class);
+    }
+
+    /** Session for a check-in token, only while it is draft or live. */
+    public static function findByCheckinToken(string $token): ?self
+    {
+        if ($token === '') {
+            return null;
+        }
+
+        return self::query()
+            ->where('checkin_token', $token)
+            ->whereIn('status', [SessionStatus::Draft->value, SessionStatus::Live->value])
+            ->first();
+    }
 
     /**
      * @return array<string, mixed>

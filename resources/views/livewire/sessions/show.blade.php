@@ -1,4 +1,4 @@
-<section class="w-full max-w-5xl space-y-8">
+<section class="w-full max-w-5xl space-y-8" wire:poll.30s.visible="syncFromBroadcast">
     <div class="flex flex-wrap items-start justify-between gap-4">
         <div>
             <flux:heading size="xl" level="1" class="flex flex-wrap items-center gap-3">
@@ -49,6 +49,8 @@
     @endunless
 
     <livewire:sessions.check-in-panel :session="$session" :key="'check-in-'.$session->id" />
+
+    <livewire:sessions.check-in-qr :session="$session" :key="'check-in-qr-'.$session->id" />
 
     <flux:modal name="end-session" class="max-w-lg">
         <div class="space-y-6">

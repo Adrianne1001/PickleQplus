@@ -6,6 +6,7 @@ use App\Enums\SessionPlayerStatus;
 use App\Models\Player;
 use App\Models\PlaySession;
 use App\Models\SessionPlayer;
+use App\Models\User;
 use App\Services\CheckInService;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Collection;
@@ -53,6 +54,17 @@ class CheckInPanel extends Component
         $this->authorize('manage', $this->session);
 
         $checkIns->checkOut($this->session, $this->player($playerId));
+    }
+
+    /** Remove a bogus check-in (P3.7). The service refuses when the player has matches. */
+    public function removeCheckIn(CheckInService $checkIns, int $playerId): void
+    {
+        $this->authorize('manage', $this->session);
+
+        $user = auth()->user();
+        abort_unless($user instanceof User, 403);
+
+        $checkIns->removeCheckIn($this->session, $this->player($playerId), $user);
     }
 
     public function goOnBreak(CheckInService $checkIns, int $playerId): void
@@ -109,6 +121,22 @@ class CheckInPanel extends Component
             ->orderBy('checked_in_at')
             ->orderBy('id')
             ->get();
+    }
+
+    /**
+     * Player ids first self-registered in this session, for the "new" badge.
+     *
+     * @return list<int>
+     */
+    #[Computed]
+    public function newPlayerIds(): array
+    {
+        $ids = [];
+        foreach ($this->session->sessionPlayers()->selfRegisteredHere()->get(['session_players.player_id']) as $entry) {
+            $ids[] = $entry->player_id;
+        }
+
+        return $ids;
     }
 
     public function render(): View

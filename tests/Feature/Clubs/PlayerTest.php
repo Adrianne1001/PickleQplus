@@ -321,3 +321,26 @@ test('player service handles create and partial update directly', function () {
     $service->update($player, ['dupr_rating' => 2.4]);
     expect($player->fresh()->stars)->toBe(1);
 });
+
+test('the player form saves, edits and clears the nickname', function () {
+    [$user, $club] = memberOf();
+
+    $page = playersPage($user, $club)
+        ->call('startAdd')
+        ->assertSeeHtml('data-test="nickname-input"')
+        ->set('name', 'Nick Test')
+        ->set('nickname', 'Nicky')
+        ->set('stars', '3')
+        ->call('save')
+        ->assertHasNoErrors();
+
+    $player = $club->players()->firstOrFail();
+    expect($player->nickname)->toBe('Nicky');
+    $page->assertSee('Nick Test')->assertSee('Nicky');
+
+    $page->call('startEdit', $player->id)->assertSet('nickname', 'Nicky')->set('nickname', '')->call('save')->assertHasNoErrors();
+    expect($player->fresh()->nickname)->toBeNull();
+
+    Player::factory()->for($club)->create(['nickname' => 'Dup']);
+    playersPage($user, $club)->call('startAdd')->set('name', 'Other')->set('nickname', 'dup')->set('stars', '3')->call('save')->assertHasErrors('nickname');
+});

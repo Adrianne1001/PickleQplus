@@ -51,6 +51,12 @@
                 <li class="flex flex-wrap items-center justify-between gap-3 px-4 py-2" wire:key="entry-{{ $entry->id }}" data-test="checked-in-row">
                     <div class="flex items-center gap-3">
                         <span class="font-medium">{{ $entry->player->name }}</span>
+                        @if ($entry->player->nickname)
+                            <span class="text-sm text-zinc-500" data-test="entry-nickname">"{{ $entry->player->nickname }}"</span>
+                        @endif
+                        @if (in_array($entry->player_id, $this->newPlayerIds, true))
+                            <span data-test="new-badge"><flux:badge size="sm" color="purple">{{ __('new') }}</flux:badge></span>
+                        @endif
                         <flux:badge size="sm" :color="match ($entry->status->value) { 'playing' => 'green', 'break' => 'amber', default => 'zinc' }">
                             {{ __(ucfirst($entry->status->value)) }}
                         </flux:badge>
@@ -64,6 +70,7 @@
                                 <flux:button size="sm" wire:click="goOnBreak({{ $entry->player_id }})" data-test="break-button">{{ __('Break') }}</flux:button>
                             @endif
                             <flux:button size="sm" variant="subtle" wire:click="checkOut({{ $entry->player_id }})" data-test="check-out-button">{{ __('Check out') }}</flux:button>
+                            <flux:button size="sm" variant="danger" wire:click="removeCheckIn({{ $entry->player_id }})" wire:confirm="{{ __('Remove this check-in? Self-registered players with no games are deleted.') }}" data-test="remove-checkin-button">{{ __('Remove') }}</flux:button>
                         </div>
                     @endunless
                 </li>

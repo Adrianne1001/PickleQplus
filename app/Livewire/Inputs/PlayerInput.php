@@ -19,11 +19,11 @@ class PlayerInput
     use PlayerValidationRules;
 
     /**
-     * @return array{name: string, dupr_id: string|null, dupr_rating: string|null, rating_source: string, stars: int|string|null}
+     * @return array{name: string, nickname?: string|null, dupr_id: string|null, dupr_rating: string|null, rating_source: string, stars: int|string|null}
      *
      * @throws ValidationException
      */
-    public function validate(Club $club, ?Player $player, string $name, string $duprId, string $rating, string $source, string $stars): array
+    public function validate(Club $club, ?Player $player, string $name, string $duprId, string $rating, string $source, string $stars, ?string $nickname = null): array
     {
         $rating = trim($rating);
         $hasRating = $rating !== '';
@@ -41,13 +41,18 @@ class PlayerInput
             'stars' => $manual && $stars !== '' ? $stars : null,
         ];
 
+        // null leaves the nickname untouched; blank clears it.
+        if ($nickname !== null) {
+            $input['nickname'] = Player::normalizeNickname($nickname);
+        }
+
         $rules = $this->playerRules($club, $player, $input);
         if (! $manual) {
             // A DUPR-sourced player never needs manual stars.
             $rules['stars'] = ['nullable'];
         }
 
-        /** @var array{name: string, dupr_id: string|null, dupr_rating: string|null, rating_source: string, stars: int|string|null} */
+        /** @var array{name: string, nickname?: string|null, dupr_id: string|null, dupr_rating: string|null, rating_source: string, stars: int|string|null} */
         return Validator::make($input, $rules)->validate();
     }
 }

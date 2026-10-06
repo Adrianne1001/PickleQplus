@@ -78,7 +78,7 @@ test('a per-row failure at commit time becomes an error row and the rest still c
     Player::creating(function (Player $player) use ($club): void {
         if ($player->name === 'Racer') {
             DB::table('players')->insert([
-                'club_id' => $club->id, 'name' => 'Other', 'dupr_id' => 'ABC123', 'stars' => 2,
+                'club_id' => $club->id, 'public_id' => 'raceother01', 'name' => 'Other', 'dupr_id' => 'ABC123', 'stars' => 2,
                 'rating_source' => 'manual', 'active' => true, 'created_at' => now(), 'updated_at' => now(),
             ]);
         }

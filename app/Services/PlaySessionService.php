@@ -10,9 +10,12 @@ use App\Models\Club;
 use App\Models\Player;
 use App\Models\PlaySession;
 use App\Models\SessionPlayer;
+use App\Models\User;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
@@ -209,10 +212,49 @@ class PlaySessionService
 
             $session->status = SessionStatus::Ended;
             $session->ended_at = Carbon::now();
+            $session->checkin_token = null;
             $session->save();
             PlaySessionChanged::dispatch($session->id);
 
             return $session;
+        });
+    }
+
+    /**
+     * Replace the check-in token; the old QR stops working at once. Staff only.
+     *
+     * @throws ValidationException
+     */
+    public function regenerateCheckinToken(PlaySession $session, User $actor): PlaySession
+    {
+        Gate::forUser($actor)->authorize('manage', $session);
+
+        return DB::transaction(function () use ($session): PlaySession {
+            $this->lockSession($session);
+            $this->guardNotEnded($session);
+
+            $session->checkin_token = PlaySession::newCheckinToken();
+            $session->save();
+            PlaySessionChanged::dispatch($session->id);
+
+            return $session;
+        });
+    }
+
+    /**
+     * Replace the secret TV link id; the old TV URL stops working at once.
+     * Staff only; allowed in any status.
+     */
+    public function resetTvLink(PlaySession $session, User $actor): void
+    {
+        Gate::forUser($actor)->authorize('manage', $session);
+
+        DB::transaction(function () use ($session): void {
+            $this->lockSession($session);
+
+            $session->tv_id = Str::random(32);
+            $session->save();
+            PlaySessionChanged::dispatch($session->id);
         });
     }
 

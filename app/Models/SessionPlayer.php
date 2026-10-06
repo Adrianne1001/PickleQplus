@@ -5,6 +5,8 @@ namespace App\Models;
 use App\Enums\SessionPlayerStatus;
 use Database\Factories\SessionPlayerFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Attributes\Scope;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -40,6 +42,18 @@ class SessionPlayer extends Model
             'queued_at' => 'datetime',
             'last_finished_at' => 'datetime',
         ];
+    }
+
+    /**
+     * Entries of players who self-registered in this entry's session
+     * (players.self_registered_session_id).
+     *
+     * @param  Builder<SessionPlayer>  $query
+     */
+    #[Scope]
+    protected function selfRegisteredHere(Builder $query): void
+    {
+        $query->whereHas('player', fn (Builder $p) => $p->whereColumn('players.self_registered_session_id', 'session_players.play_session_id'));
     }
 
     public function effectiveGames(): int

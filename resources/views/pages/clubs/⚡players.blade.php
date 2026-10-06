@@ -41,6 +41,7 @@ new #[Title('Players')] class extends Component {
     public ?int $editingId = null;
 
     public string $name = '';
+    public string $nickname = '';
     public string $dupr_id = '';
     public string $dupr_rating = '';
     public string $rating_source = 'manual';
@@ -162,6 +163,7 @@ new #[Title('Players')] class extends Component {
         $this->resetForm();
         $this->editingId = $player->id;
         $this->name = $player->name;
+        $this->nickname = $player->nickname ?? '';
         $this->dupr_id = $player->dupr_id ?? '';
         $this->dupr_rating = $player->dupr_rating !== null ? rtrim(rtrim($player->dupr_rating, '0'), '.') : '';
         $this->rating_source = $player->rating_source->value;
@@ -188,6 +190,7 @@ new #[Title('Players')] class extends Component {
             $this->dupr_rating,
             $this->rating_source,
             $this->stars,
+            $this->nickname,
         );
 
         if ($player !== null) {
@@ -370,7 +373,7 @@ new #[Title('Players')] class extends Component {
 
     private function resetForm(): void
     {
-        $this->reset('editingId', 'name', 'dupr_id', 'dupr_rating', 'stars');
+        $this->reset('editingId', 'name', 'nickname', 'dupr_id', 'dupr_rating', 'stars');
         $this->rating_source = RatingSource::Manual->value;
         $this->resetErrorBag();
     }
@@ -428,7 +431,12 @@ new #[Title('Players')] class extends Component {
             <tbody class="divide-y divide-zinc-200 dark:divide-zinc-700">
                 @forelse ($this->players as $player)
                     <tr wire:key="player-{{ $player->id }}" @class(['text-zinc-500' => ! $player->active])>
-                        <td class="px-4 py-3 font-medium">{{ $player->name }}</td>
+                        <td class="px-4 py-3 font-medium">
+                            {{ $player->name }}
+                            @if ($player->nickname)
+                                <span class="font-normal text-zinc-500" data-test="player-nickname">"{{ $player->nickname }}"</span>
+                            @endif
+                        </td>
                         <td class="px-4 py-3 font-mono">{{ $player->dupr_id ?? '–' }}</td>
                         <td class="px-4 py-3 tabular-nums">{{ $player->dupr_rating !== null ? number_format((float) $player->dupr_rating, 2) : '–' }}</td>
                         <td class="px-4 py-3"><x-star-rating :stars="$player->stars" /></td>
@@ -600,6 +608,15 @@ new #[Title('Players')] class extends Component {
             <flux:heading size="lg">{{ $editingId === null ? __('Add player') : __('Edit player') }}</flux:heading>
 
             <flux:input wire:model="name" :label="__('Name')" required maxlength="120" autocomplete="off" />
+
+            <flux:input
+                wire:model="nickname"
+                :label="__('Nickname (optional)')"
+                :description="__('Shown on the public queue and TV instead of the full name. Unique in the club.')"
+                maxlength="20"
+                autocomplete="off"
+                data-test="nickname-input"
+            />
 
             <div class="grid gap-4 sm:grid-cols-2">
                 <flux:input

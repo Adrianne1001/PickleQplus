@@ -9,11 +9,14 @@ use App\Enums\SessionStatus;
 use App\Events\PlaySessionChanged;
 use App\Models\Club;
 use App\Models\GameMatch;
+use App\Models\MatchPlayer;
 use App\Models\Player;
 use App\Models\PlaySession;
 use App\Models\SessionPlayer;
+use App\Models\User;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\ValidationException;
 
 /**
@@ -79,6 +82,54 @@ class CheckInService
             PlaySessionChanged::dispatch($session->id);
 
             return $entry;
+        });
+    }
+
+    /**
+     * Staff: remove a bogus check-in. The session_players row is deleted only
+     * when the player has no staged, playing or done match in this session
+     * (otherwise use check-out). A player who self-registered in this session
+     * (players.self_registered_session_id), with no match anywhere and no
+     * other session entries, is deleted too (spam record, no history).
+     *
+     * @throws ValidationException
+     */
+    public function removeCheckIn(PlaySession $session, Player $player, User $actor): void
+    {
+        Gate::forUser($actor)->authorize('manage', $session);
+
+        DB::transaction(function () use ($session, $player): void {
+            $this->lockSession($session);
+            $this->guardOpen($session);
+
+            // Lock order: session, then player, then entry, before any plain read.
+            Player::query()->whereKey($player->id)->lockForUpdate()->first();
+            $entry = $this->lockedEntry($session, $player);
+
+            $hasMatch = GameMatch::query()
+                ->where('play_session_id', $session->id)
+                ->whereIn('status', [MatchStatus::Staged->value, MatchStatus::Playing->value, MatchStatus::Done->value])
+                ->whereHas('matchPlayers', fn ($q) => $q->where('player_id', $player->id))
+                ->exists();
+
+            if ($hasMatch) {
+                throw ValidationException::withMessages([
+                    'player' => 'This player has matches in this session. Use check-out instead.',
+                ]);
+            }
+
+            $spam = SessionPlayer::query()->selfRegisteredHere()->whereKey($entry->id)->exists()
+                && ! MatchPlayer::query()->where('player_id', $player->id)->exists()
+                && SessionPlayer::query()->where('player_id', $player->id)->whereKeyNot($entry->id)->doesntExist();
+
+            $entry->delete();
+
+            if ($spam) {
+                Player::query()->whereKey($player->id)->delete();
+            }
+
+            $this->matches->refill($session);
+            PlaySessionChanged::dispatch($session->id);
         });
     }
 

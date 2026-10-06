@@ -19,7 +19,7 @@ use Illuminate\Validation\ValidationException;
 class PlayerService
 {
     /**
-     * @param  array{name: string, dupr_id?: string|null, dupr_rating?: float|int|string|null, rating_source?: RatingSource|string|null, stars?: int|null}  $data
+     * @param  array{name: string, nickname?: string|null, dupr_id?: string|null, dupr_rating?: float|int|string|null, rating_source?: RatingSource|string|null, stars?: int|null}  $data
      */
     public function create(Club $club, array $data): Player
     {
@@ -32,7 +32,7 @@ class PlayerService
     /**
      * Partial update: only keys present in $data change.
      *
-     * @param  array{name?: string, dupr_id?: string|null, dupr_rating?: float|int|string|null, rating_source?: RatingSource|string|null, stars?: int|null}  $data
+     * @param  array{name?: string, nickname?: string|null, dupr_id?: string|null, dupr_rating?: float|int|string|null, rating_source?: RatingSource|string|null, stars?: int|null}  $data
      */
     public function update(Player $player, array $data): Player
     {
@@ -71,9 +71,13 @@ class PlayerService
 
                 return $this->save($player, $fresh, $data);
             });
-        } catch (UniqueConstraintViolationException) {
+        } catch (UniqueConstraintViolationException $e) {
+            $key = preg_match('/players.nickname|nickname_unique/', $e->getMessage()) === 1 ? 'nickname' : 'dupr_id';
+
             throw ValidationException::withMessages([
-                'dupr_id' => 'Another player in this club already has this DUPR ID.',
+                $key => $key === 'nickname'
+                    ? 'That nickname is already taken in this club.'
+                    : 'Another player in this club already has this DUPR ID.',
             ]);
         }
     }
@@ -125,8 +129,22 @@ class PlayerService
             }
         }
 
+        $nickname = $player->nickname;
+        if (array_key_exists('nickname', $data)) {
+            $nickname = Player::normalizeNickname($data['nickname']);
+            if ($nickname !== null) {
+                if (mb_strlen($nickname) > 20) {
+                    throw ValidationException::withMessages(['nickname' => 'The nickname may not be longer than 20 characters.']);
+                }
+                if (Player::nicknameTaken($club->id, $nickname, $player->exists ? $player->id : null)) {
+                    throw ValidationException::withMessages(['nickname' => 'That nickname is already taken in this club.']);
+                }
+            }
+        }
+
         $player->forceFill([
             'name' => $name,
+            'nickname' => $nickname,
             'dupr_id' => $duprId,
             'dupr_rating' => $rating,
             'rating_source' => $source,

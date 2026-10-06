@@ -48,8 +48,9 @@ users:            + current_club_id? (last club used; for redirect after login)
 clubs:            name, slug, dupr_club_id, star_bands(json), default_courts,
                   late_arrival_policy(minimum|front|back), allow_concurrent_sessions
 club_invitations: club_id, email, role, token_hash, invited_by, expires_at, accepted_at
-players:          club_id, name, dupr_id?, dupr_rating?, stars, rating_source(manual|dupr), active
-play_sessions:    club_id, name, date, courts, scoring(json), status(draft|live|ended), checkin_token?,
+players:          club_id, public_id, name, nickname?, dupr_id?, dupr_rating?, stars, rating_source(manual|dupr), active,
+                  self_registered_at?, self_registered_session_id?
+play_sessions:    club_id, name, date, courts, scoring(json), status(draft|live|ended), public_id, tv_id, checkin_token?,
                   up_next_count, auto_fill, started_at, ended_at
 session_players:  play_session_id, player_id, status(waiting|playing|break|left), checked_in_at,
                   games_played, games_credit, queued_at, last_finished_at      unique(play_session_id, player_id)
@@ -101,6 +102,23 @@ dupr_exports:     play_session_id, user_id, match_count, file_path
 - **Concurrency:** every state change to a session (check-in, staging, start, finish, swap, void, undo, settings) runs in one DB transaction that first locks the `play_sessions` row (`lockForUpdate`). Starting a session also locks the club row. Checking a player into a live session also locks the player row. After commit, services dispatch domain events. They become broadcast events in P3.1.
 - **Wait estimate (P2.8):** a pure `WaitEstimator`. Inputs are queue position, courts, staged count, elapsed time of playing matches, and the average duration of the session's last 10 done matches (default 15 min from config). The output is minutes.
 - **Livewire structure:** Phase 2 components that contain logic (session pages and the board) are **class-based components in `app/Livewire`**, so Larastan level 8 analyses them. Thin pages may stay as `⚡` single-file components.
+
+**Phase 3 rules (decided at Phase 3 start; change here first if needed):**
+- **No video.** "Live views" means live-updating screens of courts and the queue. There's no streaming or recording of play.
+- **Public link:** every play session gets a `public_id`. It's a random, unguessable 12-character lowercase alphanumeric string, unique, set on create, and existing rows are backfilled. It never changes. The public queue URL is `/c/{club:slug}/s/{public_id}`. It's meant to be shared, e.g. in group chats. **The TV URL is separate and secret:** `/c/{club:slug}/tv/{tv_id}`, where `play_sessions.tv_id` is a random 32-character string set on create. It's shown only to staff on the board, and staff can **reset** it. The reason is that the TV shows the live check-in QR, so a TV URL derived from the public link would let anyone with the shared link check in from home and search the roster's full names. *(Changed after the P3 UI review.)* Someone photographing the QR at the venue is an accepted risk. Staff can regenerate the QR, and it expires when the session ends. If the session doesn't belong to that club, the result is 404. Sequential ids are never exposed publicly. **This includes players:** `players.public_id` (random, 12 chars, unique) is the only player handle on public pages, in the public read model, in check-in search results and in check-in submits. It's resolved within the session's club. *(Added after P3 review: raw ids let anyone with the QR check in any player by counting through ids.)* Public pages are read-only, need no login, and show players' names as entered. Draft shows "not started yet", and ended shows "session ended".
+- **Broadcasting:** there's one **public** channel per session, `play-session.{public_id}`. The `PlaySessionChanged` domain event is turned into a broadcast `session.updated`. Its payload has **no player data** (just enough to trigger a refresh), and clients re-render from the server. The broadcast is queued (`ShouldBroadcast`), after commit, and **at most once per session per request/job**, even when one action fires the domain event several times. A Reverb or queue outage must never fail an organizer action. The staff board listens on the same channel, so several staff devices stay in sync.
+- **Check-in token (P3.5):** `checkin_token` is a random 40-character string, stored plain (it has to be rendered as a QR at any time). It's issued when a session is created and works while the session is `draft` or `live`. It's cleared when the session ends. Staff can **regenerate** it, which kills the old QR at once. The QR encodes `/checkin/{token}` and is rendered as SVG with `bacon/bacon-qr-code`, which is already installed via Fortify, so no new package is needed. The QR is shown on the TV display and the organizer board.
+- **Nicknames (user decision):** public and TV pages show a player's **nickname**, not their full name. `players.nickname` is nullable, max 20 characters, and unique per club (case-insensitive) when set. If it isn't set, the public display name falls back to first name + last initial ("Adrianne B."). Staff pages show the full name, with the nickname alongside. Staff can edit the nickname.
+- **Public queue page (P3.3):** shows current courts, Up Next and the waiting list, with positions and estimated waits from `WaitEstimator`. A visitor can tap **"This is me"** to pick themselves from the checked-in list. That choice is stored only in the browser (localStorage per session) and is set automatically after a self check-in on that device. The server never shows who is watching.
+- **"You're up next" (P3.4, user decision):** page-open only, so there's no Web Push or service worker. When the "me" player enters a staged match, or a staged match with them starts on a court, the page shows a banner, vibrates (where supported) and fires a browser `Notification` if permission was granted. Permission is requested only from a user tap. This works while the page or tab is open, including in the background. It needs HTTPS in production (P6.2).
+- **Self check-in (P3.6):** `/checkin/{token}` is valid only while the token's session is draft or live. Otherwise it shows a friendly "check-in closed" page. Players **search** by name or nickname, with a minimum of 2 characters and at most 10 active players returned. Search results show the full name and nickname, because this page is reachable only via the venue QR. Picking a name checks the player in through `CheckInService`, so the usual late-arrival credit and single-live-session rules apply. If the player is already checked in, the page says so. Search results report each player's session status (not checked in / waiting / playing / on break). Picking a player who is on break returns them from break, which is the same as at the desk. Every self check-in call carries the **token** and re-checks it inside the session lock, so a page left open with a regenerated (old) QR stops working at once. If the player has no nickname, they may set one at check-in, but they can never overwrite an existing one.
+- **Self-register (P3.6, user decision):** the form takes name, **nickname (required)**, an optional DUPR ID, and **self-rated stars 1–6**. Each level has a short plain-language description. The player is created with `rating_source = manual`, with `self_registered_at` and `self_registered_session_id` set, then checked in. "Self-registered in this session" means `self_registered_session_id` equals that session. A DUPR ID or nickname already in the club is rejected with "you're already on the roster, search for your name". The board shows a **"new"** badge on players self-registered in the current session, so staff can check their level.
+- **Abuse guards (P3.7):** the limits are per IP and per session:
+  - search: 60 per minute
+  - check-in or self-register submits: 10 per minute
+  - self-registrations: 5 per hour per IP, and at most 100 per session. Only **successful** registrations count toward the 5. Rejected attempts are capped by the submit limit. This is because a whole venue often shares one IP.
+
+  Staff can **remove** a bogus check-in from the board. Removing deletes the `session_players` row, but only if the player has no staged, playing or done match in the session. Otherwise staff use check-out. If the removed player was self-registered in that session and has no matches anywhere, the player record is deleted too. This is the one exception to "players aren't hard-deleted", because these are spam records with no history.
 
 ---
 
@@ -167,7 +185,7 @@ There's no self-service signup; it's done by request.
 | Screen | Route (indicative) | Who |
 |---|---|---|
 | Organizer board | `/clubs/{club}/sessions/{session}` | Staff |
-| TV display | `/c/{club}/s/{session}/tv` | Public, read-only |
+| TV display | `/c/{club}/tv/{tv_id}` (secret link from the board) | Venue screen, read-only |
 | Public queue | `/c/{club}/s/{session}` | Players |
 | QR check-in | `/checkin/{token}` | Players |
 | Roster | `/clubs/{club}/players` | Staff |
@@ -217,13 +235,27 @@ Legend: `[ ]` todo · `[x]` done. Each item has an ID (e.g. `P2.3`) — referenc
 - [x] **P2.8** Organizer board (Livewire): courts, Up Next, waiting list with wait estimates
 
 ### Phase 3 — Live views
-- [ ] **P3.1** Broadcast events (court/queue/match changes) over Reverb; public channels per session
-- [ ] **P3.2** TV / kiosk display (full-screen, auto-updating, readable from distance)
-- [ ] **P3.3** Public queue page: position, estimated wait, current courts
-- [ ] **P3.4** "You're up next" browser notification
-- [ ] **P3.5** Per-session QR code + `checkin_token` (rotates per session, expires when session ends)
-- [ ] **P3.6** Self check-in: search and pick name; self-register new player (name + optional DUPR ID)
-- [ ] **P3.7** Rate limiting on check-in endpoints; organizer can remove bogus check-ins
+- [x] **P3.1** Broadcast events (court/queue/match changes) over Reverb; public channels per session *Split at Phase 3 start:*
+  - [x] **P3.1a** Backend: `public_id`, broadcast `session.updated` on `play-session.{public_id}` (queued, deduped per request)
+  - [x] **P3.1b** UI: organizer board refreshes live from the channel
+- [x] **P3.2** TV / kiosk display (full-screen, auto-updating, readable from distance)
+- [x] **P3.3** Public queue page: position, estimated wait, current courts
+- [x] **P3.4** "You're up next" browser notification
+- [x] **P3.5** Per-session QR code + `checkin_token` (rotates per session, expires when session ends) *Split at Phase 3 start:*
+  - [x] **P3.5a** Backend: token issue / regenerate / clear on end, QR SVG service
+  - [x] **P3.5b** UI: QR on the organizer board (with regenerate) and on the TV display
+- [x] **P3.6** Self check-in: search and pick name; self-register new player (name + nickname + optional DUPR ID + self-rated stars) *Split at Phase 3 start:*
+  - [x] **P3.6a** Backend: `players.nickname` / `self_registered_at`, public display name, `SelfCheckInService`, public queue read model (positions + waits)
+  - [x] **P3.6b** UI: `/checkin/{token}` search / pick / self-register; nickname on the player form; "new" badge on the board
+- [x] **P3.7** Rate limiting on check-in endpoints; organizer can remove bogus check-ins *Split at Phase 3 start:*
+  - [x] **P3.7a** Backend: rate limiters, per-session self-register cap, `removeCheckIn` service
+  - [x] **P3.7b** UI: "Remove" action on the board
+- [ ] **P3.8** Manual browser check. It needs `npm run build`, Reverb and a queue worker running. Check:
+  - the TV at 1080p from about 10 m, with 1, 6, 12 and 50 courts
+  - full screen and wake lock in the TV browser
+  - on a phone, the queue page: the "This is me" picker, and the up-next banner, vibration and notification, both with Reverb running and with it stopped (30-second poll fallback)
+  - the self check-in flow, including the star cards
+  - what happens on an open TV after "Regenerate QR" and "Reset TV link"
 
 ### Phase 4 — DUPR CSV export
 - [ ] **P4.1** Obtain official DUPR CSV template from club page; commit to `docs/dupr/`
@@ -265,4 +297,5 @@ Legend: `[ ]` todo · `[x]` done. Each item has an ID (e.g. `P2.3`) — referenc
 - **Larastan doesn't analyse `⚡*.blade.php` single-file components.** Their PHP runs without level 8 checks. *Resolved for Phase 2:* components with logic are class-based in `app/Livewire` (see Phase 2 rules). The existing Phase 1 SFCs are still unanalysed.
 - **Livewire `memo.path` after a slug rename:** other open tabs get a 404 on their next action. Data stays safe. Keep this in mind for the Phase 2 board, which stays open for hours.
 - **Windows-generated `package-lock.json`** can drop nested Linux native binaries (npm/cli#4828). If `npm ci` or `npm run build` fails on Linux with a missing lightningcss binding, regenerate the lock on Linux.
+- **Nickname case and accent folding (from the P3 review, low):** MySQL's collation makes the `(club_id, nickname)` index case- and accent-insensitive. The SQLite tests fold only ASCII. Every write path catches the unique violation, so production is safe. If this ever matters, add a normalized `nickname_key` column.
 - **Parallel test runs collide:** two `composer test` runs at the same time (e.g. two subagents) share the `livewire-tmp` upload folder, and the roster-import tests fail intermittently. Run the full suite from one place at a time. A failure seen only under parallel runs isn't a real regression.
