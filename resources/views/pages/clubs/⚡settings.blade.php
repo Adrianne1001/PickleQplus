@@ -26,6 +26,9 @@ new #[Title('Club settings')] class extends Component {
     public string $late_arrival_policy = 'minimum';
     public bool $allow_concurrent_sessions = false;
 
+    public bool $public_stats = false;
+    public string $leaderboard_min_games = '10';
+
     public string $confirmName = '';
 
     public function mount(Club $club): void
@@ -44,6 +47,8 @@ new #[Title('Club settings')] class extends Component {
         $this->default_courts = (string) $this->club->default_courts;
         $this->late_arrival_policy = $this->club->late_arrival_policy->value;
         $this->allow_concurrent_sessions = $this->club->allow_concurrent_sessions;
+        $this->public_stats = $this->club->public_stats;
+        $this->leaderboard_min_games = (string) $this->club->leaderboard_min_games;
         $this->star_bands = array_map(
             fn ($b): string => number_format((float) $b, 2, '.', ''),
             array_values($this->club->star_bands),
@@ -98,6 +103,20 @@ new #[Title('Club settings')] class extends Component {
         $this->fillFromClub();
 
         Flux::toast(variant: 'success', text: __('Session settings saved.'));
+    }
+
+    public function saveStatsSettings(ClubService $clubs): void
+    {
+        $this->authorize('manageSettings', $this->club);
+
+        $clubs->updateStatsSettings($this->club, [
+            'public_stats' => $this->public_stats,
+            'leaderboard_min_games' => $this->leaderboard_min_games,
+        ]);
+
+        $this->fillFromClub();
+
+        Flux::toast(variant: 'success', text: __('Stats settings saved.'));
     }
 
     public function resetStarBands(): void
@@ -289,6 +308,37 @@ new #[Title('Club settings')] class extends Component {
         <flux:error name="allow_concurrent_sessions" />
 
         <flux:button variant="primary" type="submit" data-test="save-session-settings-button">{{ __('Save session settings') }}</flux:button>
+    </form>
+
+    <flux:separator />
+
+    {{-- Stats (P5.2b) --}}
+    <form wire:submit="saveStatsSettings" class="space-y-6" data-test="stats-settings-form">
+        <flux:heading size="lg">{{ __('Stats') }}</flux:heading>
+
+        <flux:field variant="inline">
+            <flux:checkbox wire:model="public_stats" data-test="public-stats" />
+            <flux:label>{{ __('Public stats') }}</flux:label>
+            <flux:description>{{ __('Off by default. Shows a public leaderboard and the final results of ended sessions to anyone with the link. Only display names are shown.') }}</flux:description>
+        </flux:field>
+        <flux:error name="public_stats" />
+
+        @if ($club->public_stats)
+            <x-copy-field :label="__('Public leaderboard link')" :value="route('public.stats', $club)" test="public-stats-url" />
+        @endif
+
+        <flux:input
+            wire:model="leaderboard_min_games"
+            :label="__('Leaderboard minimum games')"
+            :description="__('Players need at least this many games in the period to be ranked (1 to 100).')"
+            type="number"
+            min="1"
+            max="100"
+            inputmode="numeric"
+            data-test="leaderboard-min-games"
+        />
+
+        <flux:button variant="primary" type="submit" data-test="save-stats-settings-button">{{ __('Save stats settings') }}</flux:button>
     </form>
 
     <flux:separator />

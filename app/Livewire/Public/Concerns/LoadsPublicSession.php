@@ -25,11 +25,17 @@ trait LoadsPublicSession
     /** @var PublicSnapshot|null */
     protected ?array $snapshot = null;
 
+    protected ?PlaySession $resolvedSession = null;
+
     protected function resolveSession(): PlaySession
     {
+        if ($this->resolvedSession !== null) {
+            return $this->resolvedSession;
+        }
+
         $club = Club::query()->where('slug', $this->clubSlug)->firstOrFail();
 
-        return PlaySession::findByPublicIdOrFail($club, $this->publicId);
+        return $this->resolvedSession = PlaySession::findByPublicIdOrFail($club, $this->publicId);
     }
 
     /** @return PublicSnapshot */
@@ -41,6 +47,8 @@ trait LoadsPublicSession
     /** @return PublicSnapshot */
     protected function loadSnapshotFor(PlaySession $session): array
     {
+        $this->resolvedSession = $session;
+
         return $this->snapshot = app(PublicSessionView::class)->snapshot($session);
     }
 

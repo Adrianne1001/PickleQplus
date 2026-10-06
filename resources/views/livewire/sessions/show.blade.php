@@ -21,6 +21,9 @@
                     <flux:button variant="primary" icon="stop" data-test="end-session-button">{{ __('End session') }}</flux:button>
                 </flux:modal.trigger>
             @endif
+            @unless ($session->isDraft())
+                <flux:button icon="chart-bar" :href="route('clubs.sessions.results', [$club, $session])" wire:navigate data-test="results-link">{{ __('Results') }}</flux:button>
+            @endunless
             @if ($session->isEnded())
                 <flux:button icon="arrow-down-tray" :href="route('clubs.sessions.dupr', [$club, $session])" wire:navigate data-test="dupr-export-link">{{ __('DUPR export') }}</flux:button>
             @endif

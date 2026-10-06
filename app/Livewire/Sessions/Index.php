@@ -2,22 +2,30 @@
 
 namespace App\Livewire\Sessions;
 
-use App\Enums\SessionPlayerStatus;
 use App\Enums\SessionStatus;
 use App\Models\Club;
 use App\Models\PlaySession;
+use App\Services\StatsService;
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Contracts\View\View;
-use Illuminate\Database\Eloquent\Collection;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Locked;
 use Livewire\Attributes\Title;
+use Livewire\Attributes\Url;
 use Livewire\Component;
+use Livewire\WithPagination;
 
 #[Title('Sessions')]
 class Index extends Component
 {
+    use WithPagination;
+
     #[Locked]
     public Club $club;
+
+    /** Status filter: all, draft, live or ended. */
+    #[Url]
+    public string $status = 'all';
 
     public function mount(Club $club): void
     {
@@ -26,20 +34,21 @@ class Index extends Component
         $this->club = $club;
     }
 
+    public function updatedStatus(): void
+    {
+        $this->resetPage();
+    }
+
     /**
-     * Live sessions first, then drafts, then ended; newest date first inside each group.
+     * Live sessions first, then drafts, then ended; newest date first inside
+     * each group. 20 per page, optionally filtered by status.
      *
-     * @return Collection<int, PlaySession>
+     * @return LengthAwarePaginator<int, PlaySession>
      */
     #[Computed]
-    public function sessions(): Collection
+    public function sessions(): LengthAwarePaginator
     {
-        return $this->club->playSessions()
-            ->withCount(['sessionPlayers as checked_in_count' => fn ($q) => $q->where('status', '!=', SessionPlayerStatus::Left->value)])
-            ->orderByRaw('case status when ? then 0 when ? then 1 else 2 end', [SessionStatus::Live->value, SessionStatus::Draft->value])
-            ->orderByDesc('date')
-            ->orderByDesc('id')
-            ->get();
+        return app(StatsService::class)->sessionsList($this->club, SessionStatus::tryFrom($this->status));
     }
 
     public function render(): View

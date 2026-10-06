@@ -69,6 +69,9 @@
             <flux:sidebar.item icon="calendar-days" :href="route('clubs.sessions.index', $current)" :current="request()->routeIs('clubs.sessions.*')" wire:navigate>
                 {{ __('Sessions') }}
             </flux:sidebar.item>
+            <flux:sidebar.item icon="chart-bar" :href="route('clubs.stats', $current)" :current="request()->routeIs('clubs.stats')" wire:navigate>
+                {{ __('Stats') }}
+            </flux:sidebar.item>
             <flux:sidebar.item icon="users" :href="route('clubs.members', $current)" :current="request()->routeIs('clubs.members*')" wire:navigate>
                 {{ __('Members') }}
             </flux:sidebar.item>

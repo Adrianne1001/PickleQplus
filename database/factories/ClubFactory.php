@@ -29,6 +29,8 @@ class ClubFactory extends Factory
             'default_courts' => 4,
             'late_arrival_policy' => LateArrivalPolicy::Minimum,
             'allow_concurrent_sessions' => false,
+            'public_stats' => false,
+            'leaderboard_min_games' => 10,
         ];
     }
 

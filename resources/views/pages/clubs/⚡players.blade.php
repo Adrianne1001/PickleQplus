@@ -432,7 +432,7 @@ new #[Title('Players')] class extends Component {
                 @forelse ($this->players as $player)
                     <tr wire:key="player-{{ $player->id }}" @class(['text-zinc-500' => ! $player->active])>
                         <td class="px-4 py-3 font-medium">
-                            {{ $player->name }}
+                            <a href="{{ route('clubs.players.show', [$club, $player]) }}" wire:navigate class="hover:underline" data-test="player-profile-link">{{ $player->name }}</a>
                             @if ($player->nickname)
                                 <span class="font-normal text-zinc-500" data-test="player-nickname">"{{ $player->nickname }}"</span>
                             @endif

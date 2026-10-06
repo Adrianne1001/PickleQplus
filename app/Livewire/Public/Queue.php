@@ -6,6 +6,7 @@ use App\Livewire\Public\Concerns\LoadsPublicSession;
 use App\Models\Club;
 use App\Models\PlaySession;
 use App\Services\PublicSessionView;
+use App\Services\StatsService;
 use Illuminate\Contracts\View\View;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Locked;
@@ -22,7 +23,9 @@ use Livewire\Component;
 #[Title('Queue')]
 class Queue extends Component
 {
-    use LoadsPublicSession;
+    use LoadsPublicSession {
+        getListeners as private listenersForSession;
+    }
 
     /**
      * Compact ids-only state for the browser-side "me" card and alerts. No names.
@@ -46,12 +49,30 @@ class Queue extends Component
         $this->refreshLive($this->loadSnapshot());
     }
 
+    /**
+     * An ended session no longer changes, so stop listening on its channel.
+     *
+     * @return array<string, string>
+     */
+    public function getListeners(): array
+    {
+        return $this->live['status'] === 'ended' ? [] : $this->listenersForSession();
+    }
+
     public function render(): View
     {
         $snapshot = $this->snapshot ?? $this->loadSnapshot();
 
+        $results = null;
+        if ($snapshot['status'] === 'ended') {
+            // P5.1b: final standings and match log when the club has public stats on (null otherwise).
+            $session = $this->resolveSession();
+            $results = app(StatsService::class)->publicEndedSession($session->club ?? abort(404), $session);
+        }
+
         return view('livewire.public.queue', [
             'data' => $snapshot,
+            'results' => $results,
         ]);
     }
 

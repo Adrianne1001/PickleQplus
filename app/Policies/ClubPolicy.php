@@ -23,6 +23,12 @@ class ClubPolicy
         return $user->belongsToClub($club) ? Response::allow() : Response::denyAsNotFound();
     }
 
+    /** Leaderboard and other club-wide stats: any member. */
+    public function viewStats(User $user, Club $club): Response
+    {
+        return $this->view($user, $club);
+    }
+
     /** Any member may remove themselves from the club (last-owner rule enforced in ClubService). */
     public function leave(User $user, Club $club): Response
     {

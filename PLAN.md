@@ -120,6 +120,38 @@ dupr_exports:     play_session_id, user_id? (null on user delete), match_count, 
 
   Staff can **remove** a bogus check-in from the board. Removing deletes the `session_players` row, but only if the player has no staged, playing or done match in the session. Otherwise staff use check-out. If the removed player was self-registered in that session and has no matches anywhere, the player record is deleted too. This is the one exception to "players aren't hard-deleted", because these are spam records with no history.
 
+**Phase 5 rules (decided at Phase 5 start; change here first if needed):**
+- **What counts:** stats use only matches with `status = done` and both scores set. Void, staged and playing matches never count. The source of truth is `matches`/`match_players`, not `session_players.games_played`. The winner is the team with the higher score (valid scores have no ties). Per player: `played`, `wins`, `losses`, `win %` (wins ÷ played), `points for`, `points against`, `point diff`. DUPR status doesn't affect stats.
+- **Visibility (user decision):** every stats page is available to club members (owners and staff), with the usual Phase 1 club scoping. New club setting **`public_stats`** (owner, checkbox, **default off**). When it's on:
+  - a public leaderboard at `/c/{club:slug}/stats`
+  - the public page of an **ended** session (`/c/{club:slug}/s/{public_id}`) shows its final standings and match log instead of only "session ended"
+
+  When it's off, `/c/{club:slug}/stats` is a 404 and the ended page is unchanged. Public pages show the public display name only (nickname, or first name + last initial), never full names, DUPR IDs or any id except `players.public_id`. **Player profiles are always staff-only.**
+- **Session standings (P5.1):** for one session, rank by wins desc → win % desc → point diff desc → name asc. There's no minimum number of games. Rows: rank, player, played, W, L, win %, point diff. On staff pages, a live session shows "standings so far". Publicly, standings appear only once the session has ended.
+- **Leaderboard (P5.2, user decision):** ranked by **win %** desc → wins desc → point diff desc. Only players with at least **`leaderboard_min_games`** games in the period get a rank. That's a new club setting (owner, 1–100, **default 10**). Everyone else is listed below the ranked players as "not ranked yet", sorted by played desc and then name. Players tied on all three keys share a rank (1, 2, 2, 4), and the display order inside a tie is by name. Win % is compared exactly (cross-multiplied, not as floats) and shown as a whole-number percentage. Inactive players are left out of the leaderboard. Their profiles and history stay available to staff.
+- **Periods (user decision):** `all_time` (default), `this_month`, `last_30_days` and `this_year`, picked from a dropdown. A period filters on the session's `date` in the app timezone. `last_30_days` means today and the 29 days before it. The same ranking rules and minimum apply to every period. The leaderboard and profile both take the period. The public leaderboard has the same dropdown.
+- **Player profile (P5.3):** `/clubs/{club:slug}/players/{player}` (staff only, scoped binding). It shows:
+  - the header (name, nickname, DUPR ID and rating, stars, active)
+  - the record for the chosen period: played, W–L, win %, point diff, sessions attended, last played
+  - **partners**: games together, wins together and win % together, sorted by games desc and then name
+  - **opponents**: games against and the player's W–L against them
+  - **match history**, newest first and paginated (20 per page): date, a link to the session, partner, opponents, score from the player's side, and W/L
+
+  Roster rows and staff leaderboard rows link to the profile.
+- **Session history and match log (P5.4):** the staff sessions list gets pagination (20 per page) and a status filter (all / draft / live / ended). Live and drafts are still listed first. Ended rows show the match count and player count and link to the results page. Staff results page: `/clubs/{club:slug}/sessions/{session}/results`. It shows the standings plus the **match log**: every done match in finish order with court, finish time, duration, teams and score. Void matches are listed greyed out and marked "void" (staff only). The public ended page lists done matches only.
+- **Architecture:**
+  - The ranking (sort, ties, minimum games, shared ranks, exact win % comparison) is a pure class in `app/Domain/Stats`. It takes plain rows and has unit tests.
+  - Queries live in a `StatsService` in `app/Services`. The leaderboard counts are aggregated in SQL (`GROUP BY player_id`), and the query has to work on both SQLite and MySQL. Profile partner and opponent tables are aggregated from that one player's matches.
+  - Add indexes only when a stats query needs them.
+  - The public leaderboard is cached for 60 seconds per club and period, because it's an unauthenticated aggregate query. Staff pages aren't cached.
+  - Stats pages are read-only and don't listen on the live channel. A staff page shows fresh data when reloaded.
+- **Details settled in P5 backend:**
+  - "Sessions attended" counts the sessions where the player has at least one counted match, not check-ins.
+  - "Last played" is the date of the latest such session.
+  - Players with no counted games in the period don't appear on the leaderboard at all, not even as unranked.
+  - The public leaderboard cache isn't flushed when the settings change, so it can be up to 60 seconds stale.
+  - The sessions list shows `players_count` (everyone ever checked in, including those who left).
+
 ---
 
 ## 3. Balanced rotation engine
@@ -214,7 +246,10 @@ There's no self-service signup; it's done by request.
 | Public queue | `/c/{club}/s/{session}` | Players |
 | QR check-in | `/checkin/{token}` | Players |
 | Roster | `/clubs/{club}/players` | Staff |
-| Stats & leaderboard | `/clubs/{club}/stats` | Staff / public |
+| Stats & leaderboard | `/clubs/{club}/stats` | Staff |
+| Public leaderboard | `/c/{club}/stats` (only if the club's `public_stats` is on) | Public |
+| Session results & match log | `/clubs/{club}/sessions/{session}/results` | Staff |
+| Player profile | `/clubs/{club}/players/{player}` | Staff |
 | DUPR export | `/clubs/{club}/sessions/{session}/dupr` | Staff |
 | Club settings | `/clubs/{club}/settings` | Owner |
 
@@ -292,10 +327,18 @@ Legend: `[ ]` todo · `[x]` done. Each item has an ID (e.g. `P2.3`) — referenc
 - [ ] **P4.7** Manual check: export an ended session and upload the CSV on the DUPR club page (Matches → Add Matches → Import via CSV). Confirm DUPR accepts the header order and rows. *(Added at Phase 4 review: the two samples order columns differently, so only a real upload proves it.)*
 
 ### Phase 5 — Stats
-- [ ] **P5.1** Per-session results and rankings (wins, win %, games played)
-- [ ] **P5.2** All-time club leaderboard
-- [ ] **P5.3** Player profile: history, partners, record
-- [ ] **P5.4** Session history list and match log
+- [x] **P5.1** Per-session results and rankings (wins, win %, games played) *Split at Phase 5 start:*
+  - [x] **P5.1a** Backend: pure standings ranker in `app/Domain/Stats`, `StatsService` session standings
+  - [x] **P5.1b** UI: staff results page; standings on the public ended-session page (when `public_stats` is on)
+- [x] **P5.2** All-time club leaderboard *Split at Phase 5 start:*
+  - [x] **P5.2a** Backend: `public_stats` / `leaderboard_min_games` club settings, periods, leaderboard query, cached public read
+  - [x] **P5.2b** UI: staff and public leaderboard pages with the period dropdown, settings fields, nav link
+- [x] **P5.3** Player profile: history, partners, record *Split at Phase 5 start:*
+  - [x] **P5.3a** Backend: profile record, partners, opponents, paginated history
+  - [x] **P5.3b** UI: profile page, links from the roster and leaderboard
+- [x] **P5.4** Session history list and match log *Split at Phase 5 start:*
+  - [x] **P5.4a** Backend: match log query, paginated and filtered sessions list with counts
+  - [x] **P5.4b** UI: sessions list pagination and filter, match log on the staff and public results pages
 
 ### Phase 6 — Deployment
 - [ ] **P6.1** Choose hosting (Oracle Cloud free tier vs ~$5/mo VPS)
@@ -325,4 +368,5 @@ Legend: `[ ]` todo · `[x]` done. Each item has an ID (e.g. `P2.3`) — referenc
 - **Windows-generated `package-lock.json`** can drop nested Linux native binaries (npm/cli#4828). If `npm ci` or `npm run build` fails on Linux with a missing lightningcss binding, regenerate the lock on Linux.
 - **Nickname case and accent folding (from the P3 review, low):** MySQL's collation makes the `(club_id, nickname)` index case- and accent-insensitive. The SQLite tests fold only ASCII. Every write path catches the unique violation, so production is safe. If this ever matters, add a normalized `nickname_key` column.
 - **Parallel test runs collide:** two `composer test` runs at the same time (e.g. two subagents) share the `livewire-tmp` upload folder, and the roster-import tests fail intermittently. Run the full suite from one place at a time. A failure seen only under parallel runs isn't a real regression.
+- **Stats period filter and indexes (from the P5 review, low):** the period filter uses `whereDate()` on `play_sessions.date`, so MySQL can't use an index on that column. Queries are already limited by `club_id`, so this is fine at club scale. If the leaderboard gets slow, switch to `whereBetween` on normalised bounds and add a `(club_id, date)` index.
 - **Formula injection in the DUPR CSV (from the P4 design, low):** player names are exported as entered, because DUPR needs the exact names. A self-registered name that starts with `=`, `+`, `-` or `@` could run as a formula if staff open the file in Excel. We accept this risk: the file is meant to be uploaded to DUPR rather than opened, and staff can see self-registered players on the board ("new" badge).

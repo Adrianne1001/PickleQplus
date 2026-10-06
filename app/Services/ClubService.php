@@ -162,6 +162,33 @@ class ClubService
         return $club;
     }
 
+    /**
+     * Owner-only stats settings: public stats pages and the leaderboard
+     * minimum games (1-100). Only keys present in $data change.
+     *
+     * @param  array{public_stats?: bool, leaderboard_min_games?: int|string}  $data
+     *
+     * @throws ValidationException
+     */
+    public function updateStatsSettings(Club $club, array $data): Club
+    {
+        $validated = Validator::make($data, [
+            'public_stats' => ['sometimes', 'required', 'boolean'],
+            'leaderboard_min_games' => ['sometimes', 'required', 'integer', 'between:1,100'],
+        ])->validate();
+
+        if (array_key_exists('public_stats', $validated)) {
+            $club->public_stats = (bool) $validated['public_stats'];
+        }
+        if (array_key_exists('leaderboard_min_games', $validated)) {
+            $club->leaderboard_min_games = (int) $validated['leaderboard_min_games'];
+        }
+
+        $club->save();
+
+        return $club;
+    }
+
     public function delete(Club $club): void
     {
         DB::transaction(function () use ($club): void {

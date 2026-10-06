@@ -5,7 +5,7 @@
 <main
     class="mx-auto flex min-h-screen w-full max-w-xl flex-col gap-5 px-4 py-5"
     x-data="queueMe(@js($publicId))"
-    wire:poll.30s.visible
+    @if ($data['status'] !== 'ended') wire:poll.30s.visible @endif
     data-test="queue-page"
 >
     <header>
@@ -24,6 +24,18 @@
         <p class="text-2xl font-bold" x-text="banner?.title"></p>
         <p x-text="banner?.body"></p>
     </div>
+
+    @if ($results !== null)
+        <section aria-labelledby="standings-h" data-test="public-standings">
+            <h2 id="standings-h" class="mb-2 text-xl font-bold">{{ __('Final standings') }}</h2>
+            <x-stats.table :rows="$results['standings']" />
+        </section>
+
+        <section aria-labelledby="log-h" data-test="public-match-log">
+            <h2 id="log-h" class="mb-2 text-xl font-bold">{{ __('Matches') }}</h2>
+            <x-stats.match-log :matches="$results['matches']" />
+        </section>
+    @endif
 
     @if ($live)
         {{-- Me card --}}
