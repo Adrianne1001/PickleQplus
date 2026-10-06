@@ -3,6 +3,8 @@
 namespace App\Providers;
 
 use App\Http\Middleware\EnsureClubMember;
+use App\Services\Dupr\CsvPublisher;
+use App\Services\Dupr\DuprPublisher;
 use Carbon\CarbonImmutable;
 use Illuminate\Auth\Middleware\EnsureEmailIsVerified;
 use Illuminate\Cache\RateLimiting\Limit;
@@ -21,7 +23,9 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        // v1 publishes DUPR matches as a CSV file. The Phase 7 PartnerApiPublisher will be
+        // selected here behind a config flag.
+        $this->app->bind(DuprPublisher::class, CsvPublisher::class);
     }
 
     /**

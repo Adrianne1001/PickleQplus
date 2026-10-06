@@ -13,6 +13,7 @@ use App\Models\User;
 use App\Rules\ClubSlug;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
@@ -167,6 +168,9 @@ class ClubService
             $club->delete();
             User::flushRoleCache();
         });
+
+        // Exports cascade in the DB; remove their files once the delete has committed.
+        Storage::disk('local')->deleteDirectory('dupr-exports/'.$club->id);
     }
 
     /**

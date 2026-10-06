@@ -55,9 +55,9 @@ play_sessions:    club_id, name, date, courts, scoring(json), status(draft|live|
 session_players:  play_session_id, player_id, status(waiting|playing|break|left), checked_in_at,
                   games_played, games_credit, queued_at, last_finished_at      unique(play_session_id, player_id)
 matches:          play_session_id, court_no?, status(staged|playing|done|void), team_a_score, team_b_score,
-                  started_at, finished_at, dupr_eligible, dupr_exported_at, dupr_synced_at, dupr_match_ref
+                  started_at, finished_at, dupr_eligible, dupr_exported_at, dupr_export_id?, dupr_synced_at, dupr_match_ref
 match_players:    match_id, player_id, team(A|B), slot(1|2)
-dupr_exports:     play_session_id, user_id, match_count, file_path
+dupr_exports:     play_session_id, user_id? (null on user delete), match_count, file_path
 ```
 
 `play_sessions` is named so to avoid clashing with Laravel's own `sessions` table.
@@ -164,9 +164,34 @@ Pure PHP service — no DB or UI dependency — so it is fully unit-testable. We
 
 ## 4. DUPR integration
 
-- **CSV export (v1):** match DUPR's official club template header row **verbatim**. The template must be downloaded from the DUPR club page (Matches → Add Matches → Import via CSV → Download Template) and committed to `docs/dupr/` before building the exporter. One row per game, slots A1/A2/B1/B2 with names and DUPR IDs.
+- **CSV export (v1):** match DUPR's official club template header row **verbatim**. The templates are committed in `docs/dupr/`. **One row per match** (not per game). Each row has slots A1/A2/B1/B2 with names and DUPR IDs, and up to 5 games in the `teamAGameN`/`teamBGameN` columns. *(Corrected at Phase 4 start: it used to say "one row per game".)*
 - **Export page:** shows eligible count, skipped matches and which players are missing a DUPR ID. Exporting stamps `dupr_exported_at` so nothing is uploaded twice.
 - **Abstraction:** `DuprPublisher` interface → `CsvPublisher` (now) and `PartnerApiPublisher` (later). Enabling sync is a config/flag change, not a rewrite.
+### Phase 4 rules (decided at Phase 4 start; change here first if needed)
+
+- **Template (user decision):** the app only creates doubles matches, so the exporter copies the header of **`docs/dupr/doubles-match-import.csv`** byte for byte. `docs/dupr/single-match-import.csv` is kept for reference only. It has the same 27 columns, but `location,scoreType` come after the game columns instead. The golden-file test (P4.6) reads the header from the committed doubles template, so it's never typed out in code or tests.
+- **Row mapping:**
+
+  | Column | Value |
+  |---|---|
+  | `matchType` | `D` |
+  | `event` | session name |
+  | `date` | session date, `YYYY-MM-DD` |
+  | `playerA1`… `playerB2` | the player's full `name` (never the nickname). A1 = team A slot 1, A2 = team A slot 2, B1/B2 likewise for team B |
+  | `player…DuprId` | the player's `dupr_id` (uppercase) |
+  | `player…ExternalId` | blank (user decision) |
+  | `location` | club name (user decision) |
+  | `scoreType` | `SIDEOUT` (`scoring.type = side_out`, the only type in v1) |
+  | `teamAGame1` / `teamBGame1` | `team_a_score` / `team_b_score` |
+  | `teamAGame2`–`5` / `teamBGame2`–`5` | blank (v1 matches are 1 game) |
+- **CSV format:** UTF-8 without a BOM, `,` delimiter, LF line endings, with a trailing newline after the last row. A field is quoted **only** when it contains a comma, a double quote, CR or LF, and inner quotes are doubled. This is the minimal quoting the samples use. PHP's `fputcsv` also quotes fields that contain spaces, so it isn't used as-is. Names are written as entered.
+- **Eligibility (P4.2):** a match is eligible when `status = done`, `dupr_eligible = true`, `dupr_exported_at` is null, both scores are set, and all 4 players have a DUPR ID. Every other `done` match is listed as **skipped** with a reason: missing DUPR ID(s) (the players are named), already exported, marked not eligible, or **incomplete** (a missing score or fewer than 4 players; added during P4.2). When several reasons apply, the first in this order wins: already exported, not eligible, incomplete, missing DUPR ID. Void, staged and playing matches aren't listed at all.
+- **When:** exporting is allowed only once a session has **ended**. That way the set of matches is final, and nothing on the live board races the export. The page itself can be opened for any session, and a draft or live session shows "end the session to export".
+- **Who:** owners and staff, with the usual Phase 1 club scoping. The session is resolved through the route-bound club.
+- **Export (P4.5):** one DB transaction locks the `play_sessions` row (`lockForUpdate`), works out the eligible matches again inside the lock, builds the CSV, writes it to the private `local` disk at `dupr-exports/{club_id}/{dupr_export_id}.csv`, creates the `dupr_exports` row, and stamps `dupr_exported_at` and `dupr_export_id` on every exported match. If nothing is eligible, the export is refused and no file or row is created. Exported matches can't be voided, undone or have their score edited. Those guards already exist in `MatchService`.
+- **History and re-download:** the page lists the session's past exports (date, who, match count), each with a download link. The link is a staff-only route that streams the stored file under the filename `dupr-{club-slug}-{session-date}-{export-id}.csv`. It returns 404 for another club's export or a missing file. Files are never public.
+- **Abstraction:** `DuprPublisher::publish(PlaySession, Collection<GameMatch>, User): DuprExport`. `CsvPublisher` implements it. The CSV itself is built by a pure row/CSV builder that takes plain data, so it's unit-testable without the DB. Eligibility and locking live in a service, not in the publisher.
+
 - **API (later):** use the [`Info-Esportes/dupr-partner-api`](https://github.com/Info-Esportes/dupr-partner-api) package (UAT `uat.mydupr.com`, prod `api.dupr.com`). Also enables automatic rating lookup → stars.
 
 ### Applying for DUPR Partner API access
@@ -258,12 +283,13 @@ Legend: `[ ]` todo · `[x]` done. Each item has an ID (e.g. `P2.3`) — referenc
   - what happens on an open TV after "Regenerate QR" and "Reset TV link"
 
 ### Phase 4 — DUPR CSV export
-- [ ] **P4.1** Obtain official DUPR CSV template from club page; commit to `docs/dupr/`
-- [ ] **P4.2** Eligibility rules: all 4 players have DUPR IDs, match completed, not voided, not yet exported
-- [ ] **P4.3** `DuprPublisher` interface + `CsvPublisher` producing the exact DUPR header and row format
-- [ ] **P4.4** Export page: eligible count, skipped matches, missing-ID player list, download
-- [ ] **P4.5** Stamp `dupr_exported_at`; export history (`dupr_exports`); re-download past exports
-- [ ] **P4.6** Tests: golden-file CSV comparison against the official template
+- [x] **P4.1** Obtain official DUPR CSV template from club page; commit to `docs/dupr/` *(user supplied `doubles-match-import.csv` (used) and `single-match-import.csv` (reference))*
+- [x] **P4.2** Eligibility rules: all 4 players have DUPR IDs, match completed, not voided, not yet exported
+- [x] **P4.3** `DuprPublisher` interface + `CsvPublisher` producing the exact DUPR header and row format
+- [x] **P4.4** Export page: eligible count, skipped matches, missing-ID player list, download
+- [x] **P4.5** Stamp `dupr_exported_at`; export history (`dupr_exports`); re-download past exports
+- [x] **P4.6** Tests: golden-file CSV comparison against the official template
+- [ ] **P4.7** Manual check: export an ended session and upload the CSV on the DUPR club page (Matches → Add Matches → Import via CSV). Confirm DUPR accepts the header order and rows. *(Added at Phase 4 review: the two samples order columns differently, so only a real upload proves it.)*
 
 ### Phase 5 — Stats
 - [ ] **P5.1** Per-session results and rankings (wins, win %, games played)
@@ -299,3 +325,4 @@ Legend: `[ ]` todo · `[x]` done. Each item has an ID (e.g. `P2.3`) — referenc
 - **Windows-generated `package-lock.json`** can drop nested Linux native binaries (npm/cli#4828). If `npm ci` or `npm run build` fails on Linux with a missing lightningcss binding, regenerate the lock on Linux.
 - **Nickname case and accent folding (from the P3 review, low):** MySQL's collation makes the `(club_id, nickname)` index case- and accent-insensitive. The SQLite tests fold only ASCII. Every write path catches the unique violation, so production is safe. If this ever matters, add a normalized `nickname_key` column.
 - **Parallel test runs collide:** two `composer test` runs at the same time (e.g. two subagents) share the `livewire-tmp` upload folder, and the roster-import tests fail intermittently. Run the full suite from one place at a time. A failure seen only under parallel runs isn't a real regression.
+- **Formula injection in the DUPR CSV (from the P4 design, low):** player names are exported as entered, because DUPR needs the exact names. A self-registered name that starts with `=`, `+`, `-` or `@` could run as a formula if staff open the file in Excel. We accept this risk: the file is meant to be uploaded to DUPR rather than opened, and staff can see self-registered players on the board ("new" badge).

@@ -183,6 +183,14 @@ class PlaySession extends Model
         return $this->hasMany(GameMatch::class);
     }
 
+    /**
+     * @return HasMany<DuprExport, $this>
+     */
+    public function duprExports(): HasMany
+    {
+        return $this->hasMany(DuprExport::class);
+    }
+
     public function isDraft(): bool
     {
         return $this->status === SessionStatus::Draft;

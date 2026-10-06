@@ -1,0 +1,4 @@
+matchType,event,date,playerA1,playerA1DuprId,playerA1ExternalId,playerA2,playerA2DuprId,playerA2ExternalId,playerB1,playerB1DuprId,playerB1ExternalId,playerB2,playerB2DuprId,playerB2ExternalId,location,scoreType,teamAGame1,teamBGame1,teamAGame2,teamBGame2,teamAGame3,teamBGame3,teamAGame4,teamBGame4,teamAGame5,teamBGame5
+D,PickleBuddies DUPR Night,2026-09-29,Test Player 1,[DUPR ID],,Test Player 4,[DUPR ID],,Test Player 7,[DUPR ID],,Test Player 10,[DUPR ID],,picklebuddies,SIDEOUT,0,11,,,,,,,,
+D,PickleBuddies DUPR Night,2026-09-29,Test Player 2,[DUPR ID],,Test Player 5,[DUPR ID],,Test Player 8,[DUPR ID],,Test Player 11,[DUPR ID],,picklebuddies,SIDEOUT,11,4,,,,,,,,
+D,PickleBuddies DUPR Night,2026-09-29,Test Player 3,[DUPR ID],,Test Player 6,[DUPR ID],,Test Player 9,[DUPR ID],,Test Player 12,[DUPR ID],,picklebuddies,SIDEOUT,11,8,,,,,,,,

@@ -1,10 +1,12 @@
 <?php
 
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\DuprExportDownloadController;
 use App\Http\Controllers\InvitationAcceptController;
 use App\Livewire\Public\CheckIn as PublicCheckIn;
 use App\Livewire\Public\Queue as PublicQueue;
 use App\Livewire\Public\Tv as PublicTv;
+use App\Livewire\Sessions\DuprExportPage;
 use App\Livewire\Sessions\Form as SessionForm;
 use App\Livewire\Sessions\Index as SessionsIndex;
 use App\Livewire\Sessions\Show as SessionShow;
@@ -43,6 +45,13 @@ Route::middleware(['auth', 'verified'])->group(function () {
             Route::livewire('sessions/create', SessionForm::class)->name('clubs.sessions.create');
             Route::livewire('sessions/{session}', SessionShow::class)->name('clubs.sessions.show');
             Route::livewire('sessions/{session}/edit', SessionForm::class)->name('clubs.sessions.edit');
+
+            Route::livewire('sessions/{session}/dupr', DuprExportPage::class)->name('clubs.sessions.dupr');
+
+            // DUPR export history re-download (P4.5). The export is resolved through the session.
+            Route::get('sessions/{session}/dupr/exports/{export}/download', DuprExportDownloadController::class)
+                ->where('export', '[0-9]+')
+                ->name('clubs.sessions.dupr.download');
         });
 });
 

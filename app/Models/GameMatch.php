@@ -24,6 +24,7 @@ use Illuminate\Support\Carbon;
  * @property Carbon|null $finished_at
  * @property bool $dupr_eligible
  * @property Carbon|null $dupr_exported_at
+ * @property int|null $dupr_export_id
  * @property Carbon|null $dupr_synced_at
  * @property string|null $dupr_match_ref
  */
@@ -59,6 +60,14 @@ class GameMatch extends Model
     public function playSession(): BelongsTo
     {
         return $this->belongsTo(PlaySession::class);
+    }
+
+    /**
+     * @return BelongsTo<DuprExport, $this>
+     */
+    public function duprExport(): BelongsTo
+    {
+        return $this->belongsTo(DuprExport::class, 'dupr_export_id');
     }
 
     /**
