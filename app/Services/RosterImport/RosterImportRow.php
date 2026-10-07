@@ -22,6 +22,7 @@ final readonly class RosterImportRow
      * @param  list<string>  $messages  Why the row is an error or skip (empty otherwise).
      * @param  array{name: string, dupr_id: string|null, dupr_rating: string|null}  $data  Normalized values; rating is a 3-decimal string.
      * @param  int|null  $playerId  The matched existing player (update and skip rows).
+     * @param  string|null  $gender  'man' or 'woman' when the file gave a valid gender; null when blank or invalid (invalid is an error row).
      */
     public function __construct(
         public int $line,
@@ -29,10 +30,11 @@ final readonly class RosterImportRow
         public array $messages,
         public array $data,
         public ?int $playerId = null,
+        public ?string $gender = null,
     ) {}
 
     /**
-     * @return array{line: int, action: string, messages: list<string>, data: array{name: string, dupr_id: string|null, dupr_rating: string|null}, player_id: int|null}
+     * @return array{line: int, action: string, messages: list<string>, data: array{name: string, dupr_id: string|null, dupr_rating: string|null}, player_id: int|null, gender: string|null}
      */
     public function toArray(): array
     {
@@ -42,14 +44,15 @@ final readonly class RosterImportRow
             'messages' => $this->messages,
             'data' => $this->data,
             'player_id' => $this->playerId,
+            'gender' => $this->gender,
         ];
     }
 
     /**
-     * @param  array{line: int, action: 'create'|'update'|'skip'|'error', messages: list<string>, data: array{name: string, dupr_id: string|null, dupr_rating: string|null}, player_id: int|null}  $row
+     * @param  array{line: int, action: 'create'|'update'|'skip'|'error', messages: list<string>, data: array{name: string, dupr_id: string|null, dupr_rating: string|null}, player_id: int|null, gender?: string|null}  $row
      */
     public static function fromArray(array $row): self
     {
-        return new self($row['line'], $row['action'], $row['messages'], $row['data'], $row['player_id']);
+        return new self($row['line'], $row['action'], $row['messages'], $row['data'], $row['player_id'], $row['gender'] ?? null);
     }
 }

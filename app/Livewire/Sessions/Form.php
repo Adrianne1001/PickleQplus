@@ -2,6 +2,8 @@
 
 namespace App\Livewire\Sessions;
 
+use App\Domain\Rotation\SkillGroups;
+use App\Enums\RotationMode;
 use App\Models\Club;
 use App\Models\PlaySession;
 use App\Services\PlaySessionService;
@@ -34,6 +36,18 @@ class Form extends Component
 
     public string $win_by = '2';
 
+    public string $rotation_mode = 'balanced';
+
+    /**
+     * Skill court groups being edited (only used while the mode is skill courts).
+     *
+     * @var list<array{from_court: string, to_court: string, min_stars: string, max_stars: string}>
+     */
+    public array $skill_groups = [];
+
+    /** True while waiting for the organizer to confirm a mode change on a live session. */
+    public bool $confirmingMode = false;
+
     public function mount(Club $club, ?PlaySession $session = null): void
     {
         $this->club = $club;
@@ -55,6 +69,15 @@ class Form extends Component
             $this->courts = (string) $session->courts;
             $this->up_next_count = (string) $session->up_next_count;
             $this->auto_fill = $session->auto_fill;
+            $this->rotation_mode = $session->rotation_mode->value;
+            if ($session->rotation_mode === RotationMode::SkillCourts) {
+                $stored = SkillGroups::tryFromArray($session->mode_settings['skill_groups'] ?? [], $session->courts);
+                if ($stored === null) {
+                    $this->prefillGroups();
+                } else {
+                    $this->skill_groups = $this->stringRows($stored->toArray());
+                }
+            }
             $scoring = $session->scoring;
         }
 
@@ -62,7 +85,87 @@ class Form extends Component
         $this->win_by = (string) $scoring['win_by'];
     }
 
+    public function updatedRotationMode(): void
+    {
+        if ($this->rotation_mode === RotationMode::SkillCourts->value && $this->skill_groups === []) {
+            $this->prefillGroups();
+        }
+    }
+
+    /** Keeps the last group's range in step with the court count. */
+    public function updatedCourts(): void
+    {
+        if ($this->rotation_mode !== RotationMode::SkillCourts->value || $this->skill_groups === []) {
+            return;
+        }
+        if (ctype_digit($this->courts) && (int) $this->courts >= 2) {
+            $last = array_key_last($this->skill_groups);
+            $this->skill_groups[$last]['to_court'] = $this->courts;
+        }
+    }
+
+    public function addGroup(): void
+    {
+        $last = $this->skill_groups === [] ? null : $this->skill_groups[array_key_last($this->skill_groups)];
+        $from = $last !== null && ctype_digit($last['to_court']) ? (string) ((int) $last['to_court'] + 1) : '1';
+        $this->skill_groups[] = [
+            'from_court' => $from,
+            'to_court' => ctype_digit($this->courts) ? $this->courts : '',
+            'min_stars' => '',
+            'max_stars' => '',
+        ];
+    }
+
+    public function removeGroup(int $index): void
+    {
+        $groups = $this->skill_groups;
+        unset($groups[$index]);
+        $this->skill_groups = array_values($groups);
+    }
+
+    public function resetGroups(): void
+    {
+        $this->prefillGroups();
+    }
+
+    private function prefillGroups(): void
+    {
+        $courts = ctype_digit($this->courts) ? (int) $this->courts : 0;
+        try {
+            $this->skill_groups = $this->stringRows(SkillGroups::defaultFor($courts)->toArray());
+        } catch (\InvalidArgumentException) {
+            $this->skill_groups = [];
+        }
+    }
+
+    /**
+     * @param  list<array<string, int>>  $groups
+     * @return list<array{from_court: string, to_court: string, min_stars: string, max_stars: string}>
+     */
+    private function stringRows(array $groups): array
+    {
+        return array_map(fn (array $g): array => [
+            'from_court' => (string) $g['from_court'],
+            'to_court' => (string) $g['to_court'],
+            'min_stars' => (string) $g['min_stars'],
+            'max_stars' => (string) $g['max_stars'],
+        ], $groups);
+    }
+
     public function save(PlaySessionService $sessions): void
+    {
+        $this->persist($sessions, false);
+    }
+
+    public function confirmModeChange(PlaySessionService $sessions): void
+    {
+        $this->persist($sessions, true);
+    }
+
+    /**
+     * @param  bool  $confirmed  Only the confirm action passes true; it is never a client-supplied value.
+     */
+    private function persist(PlaySessionService $sessions, bool $confirmed): void
     {
         // Type-level input check only; ranges and rules live in PlaySessionService.
         $this->validate([
@@ -78,11 +181,24 @@ class Form extends Component
             'courts' => (int) $this->courts,
             'up_next_count' => (int) $this->up_next_count,
             'auto_fill' => $this->auto_fill,
+            'rotation_mode' => $this->rotation_mode,
             'scoring' => array_replace(PlaySessionService::DEFAULT_SCORING, [
                 'to' => (int) $this->to,
                 'win_by' => (int) $this->win_by,
             ]),
         ];
+
+        if ($this->rotation_mode === RotationMode::SkillCourts->value) {
+            $data['mode_settings'] = ['skill_groups' => $this->skill_groups];
+        }
+
+        // A change that voids Up Next on a live session needs an explicit confirmation.
+        if (! $confirmed && $this->session !== null && $sessions->changeVoidsUpNext($this->session, $data)) {
+            $this->confirmingMode = true;
+
+            return;
+        }
+        $this->confirmingMode = false;
 
         if ($this->session === null) {
             $this->authorize('create', [PlaySession::class, $this->club]);
@@ -95,8 +211,13 @@ class Form extends Component
         $this->redirectRoute('clubs.sessions.show', [$this->club, $session], navigate: true);
     }
 
+    public function cancelModeChange(): void
+    {
+        $this->confirmingMode = false;
+    }
+
     public function render(): View
     {
-        return view('livewire.sessions.form');
+        return view('livewire.sessions.form', ['modes' => RotationMode::selectable()]);
     }
 }

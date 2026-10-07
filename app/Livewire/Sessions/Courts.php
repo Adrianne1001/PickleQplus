@@ -74,6 +74,8 @@ class Courts extends Component
     {
         return view('livewire.sessions.courts', [
             'courts' => app(SessionBoard::class)->courts($this->session),
+            'mixed' => app(SessionBoard::class)->mode($this->session) === 'mixed',
+            'groups' => app(SessionBoard::class)->groups($this->session),
         ]);
     }
 }

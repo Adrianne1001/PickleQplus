@@ -216,7 +216,7 @@ test('the sample CSV downloads with the expected header', function () {
 
     importPage($owner, $club)
         ->call('downloadSample')
-        ->assertFileDownloaded('pickleq-roster-sample.csv', "name,dupr_id,dupr_rating\nAna Lopez,8DPLX8,4.25\nBen Cruz,,3.5\nCara Dela Rosa,,\n");
+        ->assertFileDownloaded('pickleq-roster-sample.csv', "name,dupr_id,dupr_rating,gender\nAna Lopez,8DPLX8,4.25,woman\nBen Cruz,,3.5,man\nCara Dela Rosa,,,\n");
 });
 
 test('the preview UI shows the inactive-match message on update and skip rows', function () {

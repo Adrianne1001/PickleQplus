@@ -15,7 +15,7 @@ A free, self-hosted Laravel app modelled on PickleQ's **Venue Pro** plan: open-p
 | Tenancy | **Anyone can sign up** and create clubs. Each club has its own staff, roster, settings and DUPR club ID. |
 | Players | **Stored per club** (not shared globally): name, DUPR ID, DUPR rating, stars. |
 | Skill | DUPR rating → **1–6 stars** (bands below). Unrated / no DUPR → stars set manually. Bands editable per club. |
-| Rotation | **Balanced** only in v1. Engine designed so more modes can plug in later. |
+| Rotation | **Balanced** only in v1. Engine designed so more modes can plug in later. Phase 7 adds Mixed doubles, Skill courts, Winners stay and King/Queen of the Court, chosen per session (see Phase 7 rules). |
 | Scoring | 1 game to 11, **side-out**. Stored per session as config so it can change later. |
 | Check-in | Per-session QR code → **pick your name** (no PIN). New players can self-register. |
 | v1 features | TV/kiosk display · QR self check-in · public live queue link · all-time stats & leaderboard |
@@ -59,6 +59,8 @@ matches:          play_session_id, court_no?, status(staged|playing|done|void), 
 match_players:    match_id, player_id, team(A|B), slot(1|2)
 dupr_exports:     play_session_id, user_id? (null on user delete), match_count, file_path
 ```
+
+Phase 7 additions (P7.4, see `docs/design/p7.4-rotation-modes.md`): `players.gender?` (man|woman), `play_sessions.rotation_mode` (default balanced) + `mode_settings?` (json), `matches.court_group?`, and `session_players.pending_court?` + `pending_from_match_id?` (P7.4d). `matches.court_no` is also set on court-bound staged matches.
 
 `play_sessions` is named so to avoid clashing with Laravel's own `sessions` table.
 
@@ -151,6 +153,36 @@ dupr_exports:     play_session_id, user_id? (null on user delete), match_count, 
   - Players with no counted games in the period don't appear on the leaderboard at all, not even as unranked.
   - The public leaderboard cache isn't flushed when the settings change, so it can be up to 60 seconds stale.
   - The sessions list shows `players_count` (everyone ever checked in, including those who left).
+
+**Phase 7 rules (decided at P7.3/P7.4 start, 2026-10-07; change here first if needed):**
+- **P7.3 is blocked on P7.1 (user decision).** The public DUPR API (`api.dupr.gg/api-explorer`, group `public`, server `api.dupr.com`) has only 4 endpoints, all of which need a bearer token: `/subscription/active`, `/user/club/membership`, `/public/user/info` (the token holder only) and `/auth/{version}/refresh`. None of them looks up another player's rating, so there's no anonymous rating lookup. Nothing gets built until DUPR approves Partner API access. Once it does, fetch triggers are **on DUPR ID save** (queued job: player form, roster import, self-register) and a **nightly refresh** of every player with a DUPR ID. There's no manual refresh button. A fetched rating updates `dupr_rating`. As before, stars are recalculated only for `rating_source = dupr`. Use the **doubles** rating.
+- **Rotation modes (P7.4):** `balanced` (the default and the v1 behaviour), `mixed`, `skill_courts`, `winners_stay` and `king_of_court`. The mode is a per-session setting.
+- **Changing the mode while live (user decision):** allowed. Switching voids staged Up Next matches, and playing matches carry on. The new mode takes over as courts free up. *(Settled in the P7.4a review.)* A settings change voids Up Next only if the active mode stages from that setting (`skill_groups` in skill courts). A `winners_stay_max_wins` change applies at the next finish. `PlaySessionService::changeVoidsUpNext()` decides this, and the form asks for confirmation only when it returns true. Modes are offered only if listed in `pickleq.rotation_modes_enabled`. Each P7.4 item adds its mode there when it's done.
+- **Mixed doubles:**
+  - Every team is 1 man + 1 woman, and those teams are balanced as usual.
+  - **If the waiting players don't include 2 men and 2 women, the Up Next slot waits** (user decision). There's no fallback to a non-mixed match.
+  - Players need `players.gender` (nullable, `man`/`woman`). A player with no gender is never placed in a mixed session. The board flags them.
+  - Gender can be set in 3 places (user decision): the staff player form (and a roster import column), an optional question at self-register, and self check-in, where a player with no gender may set it but never overwrite it (the same rule as nicknames).
+- **Skill courts:** staff split the courts into groups, and each group has a star range (e.g. courts 1–2 for ★4–6, the rest for ★1–3). Every player belongs to the group that matches their stars. Each group has its own balanced queue and Up Next slots. A staged match is started on the lowest free court in its group.
+  - *Settled in P7.4c and its review:*
+    - **Groups need:** at least 2 courts and at least 2 groups. The court ranges are contiguous and cover every court exactly. The star ranges cover ★1–6 exactly, with no overlap.
+    - **Default groups:** the top half of the courts (1..⌈n/2⌉) is ★4–6 and the rest is ★1–3. Court 1 is the top court. A switch to skill courts with no groups given uses the default. Changing the number of courts resizes the last group, and is rejected if a group would be left with no courts.
+    - **Up Next per group:** `up_next_count` applies to each group. Lowering it voids the newest surplus matches.
+    - **Group membership** comes from the player's stars at the time of staging. A star change takes effect at the next staging.
+    - **Stale or invalid groups:** a staged match with a stale or invalid group is voided on refill, and can never start. A playing match's group is worked out from its court.
+    - **Swap and remove:** swap may cross groups as a staff override. Remove picks from the group.
+    - **Public pages** show group labels ("Courts 1–2") and positions within the group, never stars.
+- **Winners stay:** the winning team stays on the court, and the losers go back to the queue. The next 2 challengers come from the queue, picked by the engine to balance against the winners. After **`winners_stay_max_wins`** wins in a row (a per-session setting, 1–5, **default 2**; user decision), all 4 players go back to the queue. A court whose last match didn't leave a winning team on it is filled with an ordinary balanced match.
+- **King/Queen of the Court, as a rolling ladder (user decision):** court 1 is the King court. When a court finishes, its winners move up a court and its losers move down a court. Court 1's winners stay on court 1, bottom-court losers go back to the queue, and the queue feeds the bottom court. Each court collects 4 incoming players. When it has all 4, a match is staged on that court, and partners are split (one player from each incoming pair per team). No court waits for every other court to finish. The first fill puts the highest-star players on court 1.
+- **Rules settled in the P7.4 design** (user decisions are marked; full design in `docs/design/p7.4-rotation-modes.md`):
+  - In winners stay and King of the Court, Up Next is each court's bound staged match, and `up_next_count` is hidden and ignored.
+  - **Winners stay, broken team (user decision):** if one of the staying winners goes on break or checks out, the court resets. The other winner goes back to the queue, and the court gets a balanced match.
+  - **Skill courts are strict (user decision):** courts never take another group's match, even when they're idle.
+  - **King of the Court has no win cap on court 1 (user decision).** The winners split every game anyway.
+  - Voiding a playing match in winners stay or King of the Court costs those players their court spot. They go to the plain queue.
+  - **King of the Court ladder size:** with fewer than 4 × courts players, the ladder shrinks to B = min(courts, ⌊(waiting + playing) / 4⌋), so nobody waits on a court that can't be reached.
+  - A King of the Court pool with more than 4 players stages the 4 earliest arrivals, and the rest go to the queue.
+  - With fewer than 2 challengers, the winners-stay winners wait and the court sits idle.
 
 ---
 
@@ -349,8 +381,14 @@ Legend: `[ ]` todo · `[x]` done. Each item has an ID (e.g. `P2.3`) — referenc
 ### Phase 7 — Later
 - [ ] **P7.1** Apply for DUPR Partner API access (see §4)
 - [ ] **P7.2** `PartnerApiPublisher` + queued sync jobs + "Sync to DUPR" button (feature-flagged)
-- [ ] **P7.3** Auto-fetch DUPR rating by DUPR ID → stars
-- [ ] **P7.4** More rotation modes: Mixed doubles, King/Queen of the Court, Skill courts, Winners/Losers
+- [ ] **P7.3** Auto-fetch DUPR rating by DUPR ID → stars. *Blocked on P7.1 (2026-10-07): the public DUPR API has no rating lookup (see Phase 7 rules).*
+- [ ] **P7.4** More rotation modes: Mixed doubles, King/Queen of the Court, Skill courts, Winners/Losers. *Split at P7.4 start. Design: `docs/design/p7.4-rotation-modes.md`. "Winners/Losers" means winners stay.*
+  - [x] **P7.4a** Mode framework + gender. Backend: `rotation_mode`/`mode_settings`/`players.gender`, rotation strategy interface (balanced only), mode switch while live, gender on the player form, import, self-register and self check-in. UI: mode select, gender fields. Done when the existing balanced tests pass unchanged.
+  - [x] **P7.4b** Mixed doubles: `MixedRotationEngine`, mixed strategy, same-gender swap/remove, the board's "no gender" flag. Done when every team is 1M+1W and the slot waits otherwise.
+  - [x] **P7.4c** Skill courts: `SkillGroups`, per-group Up Next and courts, group editor, grouped board/TV/public. Done when a match only ever starts on a court in its group.
+  - [ ] **P7.4d** Court-bound staging + winners stay: pending pools, `MatchCompleter`, streaks, void/undo/break rules, max-wins setting. Done when winners stay until max wins and pools stay consistent after void, undo and break.
+  - [ ] **P7.4e** King/Queen of the Court: `LadderPlanner`, routing, ladder shrink, first fill by stars, crown/pools UI. Done when an 8-court simulation runs with no deadlock through breaks and court changes.
+  - [ ] **P7.4f** Cross-mode adversarial tests on MySQL, plus a manual board check.
 
 ---
 
@@ -369,4 +407,5 @@ Legend: `[ ]` todo · `[x]` done. Each item has an ID (e.g. `P2.3`) — referenc
 - **Nickname case and accent folding (from the P3 review, low):** MySQL's collation makes the `(club_id, nickname)` index case- and accent-insensitive. The SQLite tests fold only ASCII. Every write path catches the unique violation, so production is safe. If this ever matters, add a normalized `nickname_key` column.
 - **Parallel test runs collide:** two `composer test` runs at the same time (e.g. two subagents) share the `livewire-tmp` upload folder, and the roster-import tests fail intermittently. Run the full suite from one place at a time. A failure seen only under parallel runs isn't a real regression.
 - **Stats period filter and indexes (from the P5 review, low):** the period filter uses `whereDate()` on `play_sessions.date`, so MySQL can't use an index on that column. Queries are already limited by `club_id`, so this is fine at club scale. If the leaderboard gets slow, switch to `whereBetween` on normalised bounds and add a `(club_id, date)` index.
+- **Missing wait estimates in mixed mode (from the P7.4b review, low):** in mixed mode, the TV and public queue show "–" for any waiting player who can't get an estimate: players with no gender, and players whose gender doesn't have enough partners from the other gender waiting. Someone watching could guess that a "–" player might have no gender on record. We accept this, because the gender value itself is never shown publicly.
 - **Formula injection in the DUPR CSV (from the P4 design, low):** player names are exported as entered, because DUPR needs the exact names. A self-registered name that starts with `=`, `+`, `-` or `@` could run as a formula if staff open the file in Excel. We accept this risk: the file is meant to be uploaded to DUPR rather than opened, and staff can see self-registered players on the board ("new" badge).

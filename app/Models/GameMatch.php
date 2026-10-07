@@ -17,6 +17,7 @@ use Illuminate\Support\Carbon;
  * @property int $id
  * @property int $play_session_id
  * @property int|null $court_no
+ * @property int|null $court_group
  * @property MatchStatus $status
  * @property int|null $team_a_score
  * @property int|null $team_b_score
@@ -43,6 +44,7 @@ class GameMatch extends Model
     {
         return [
             'court_no' => 'integer',
+            'court_group' => 'integer',
             'status' => MatchStatus::class,
             'team_a_score' => 'integer',
             'team_b_score' => 'integer',

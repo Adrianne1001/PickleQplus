@@ -44,7 +44,7 @@ final readonly class RosterImportPreview
     }
 
     /**
-     * @param  array{club_id: int, rows: list<array{line: int, action: 'create'|'update'|'skip'|'error', messages: list<string>, data: array{name: string, dupr_id: string|null, dupr_rating: string|null}, player_id: int|null}>}  $data
+     * @param  array{club_id: int, rows: list<array{line: int, action: 'create'|'update'|'skip'|'error', messages: list<string>, data: array{name: string, dupr_id: string|null, dupr_rating: string|null}, player_id: int|null, gender?: string|null}>}  $data
      */
     public static function fromArray(array $data): self
     {

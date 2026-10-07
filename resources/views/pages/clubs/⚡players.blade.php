@@ -42,6 +42,7 @@ new #[Title('Players')] class extends Component {
 
     public string $name = '';
     public string $nickname = '';
+    public string $gender = '';
     public string $dupr_id = '';
     public string $dupr_rating = '';
     public string $rating_source = 'manual';
@@ -164,6 +165,7 @@ new #[Title('Players')] class extends Component {
         $this->editingId = $player->id;
         $this->name = $player->name;
         $this->nickname = $player->nickname ?? '';
+        $this->gender = $player->gender?->value ?? '';
         $this->dupr_id = $player->dupr_id ?? '';
         $this->dupr_rating = $player->dupr_rating !== null ? rtrim(rtrim($player->dupr_rating, '0'), '.') : '';
         $this->rating_source = $player->rating_source->value;
@@ -191,6 +193,7 @@ new #[Title('Players')] class extends Component {
             $this->rating_source,
             $this->stars,
             $this->nickname,
+            $this->gender,
         );
 
         if ($player !== null) {
@@ -348,7 +351,7 @@ new #[Title('Players')] class extends Component {
         $this->authorize('create', [Player::class, $this->club]);
 
         return response()->streamDownload(function (): void {
-            echo "name,dupr_id,dupr_rating\nAna Lopez,8DPLX8,4.25\nBen Cruz,,3.5\nCara Dela Rosa,,\n";
+            echo "name,dupr_id,dupr_rating,gender\nAna Lopez,8DPLX8,4.25,woman\nBen Cruz,,3.5,man\nCara Dela Rosa,,,\n";
         }, 'pickleq-roster-sample.csv', ['Content-Type' => 'text/csv']);
     }
 
@@ -373,7 +376,7 @@ new #[Title('Players')] class extends Component {
 
     private function resetForm(): void
     {
-        $this->reset('editingId', 'name', 'nickname', 'dupr_id', 'dupr_rating', 'stars');
+        $this->reset('editingId', 'name', 'nickname', 'gender', 'dupr_id', 'dupr_rating', 'stars');
         $this->rating_source = RatingSource::Manual->value;
         $this->resetErrorBag();
     }
@@ -420,6 +423,7 @@ new #[Title('Players')] class extends Component {
             <thead class="bg-zinc-50 dark:bg-zinc-900">
                 <tr class="text-start">
                     <th scope="col" class="px-4 py-3 text-start font-medium">{{ __('Name') }}</th>
+                    <th scope="col" class="px-4 py-3 text-start font-medium">{{ __('Gender') }}</th>
                     <th scope="col" class="px-4 py-3 text-start font-medium">{{ __('DUPR ID') }}</th>
                     <th scope="col" class="px-4 py-3 text-start font-medium">{{ __('Rating') }}</th>
                     <th scope="col" class="px-4 py-3 text-start font-medium">{{ __('Stars') }}</th>
@@ -437,6 +441,7 @@ new #[Title('Players')] class extends Component {
                                 <span class="font-normal text-zinc-500" data-test="player-nickname">"{{ $player->nickname }}"</span>
                             @endif
                         </td>
+                        <td class="px-4 py-3" data-test="player-gender">{{ $player->gender?->label() ?? '–' }}</td>
                         <td class="px-4 py-3 font-mono">{{ $player->dupr_id ?? '–' }}</td>
                         <td class="px-4 py-3 tabular-nums">{{ $player->dupr_rating !== null ? number_format((float) $player->dupr_rating, 2) : '–' }}</td>
                         <td class="px-4 py-3"><x-star-rating :stars="$player->stars" /></td>
@@ -463,7 +468,7 @@ new #[Title('Players')] class extends Component {
                     </tr>
                 @empty
                     <tr>
-                        <td colspan="7" class="px-4 py-10 text-center text-zinc-500" data-test="players-empty">
+                        <td colspan="8" class="px-4 py-10 text-center text-zinc-500" data-test="players-empty">
                             {{ $search !== '' || $status !== 'active' ? __('No players match your filters.') : __('No players yet. Add your first player to get started.') }}
                         </td>
                     </tr>
@@ -481,10 +486,10 @@ new #[Title('Players')] class extends Component {
                 <flux:heading size="lg">{{ __('Import players from CSV') }}</flux:heading>
                 <flux:text class="mt-1">
                     {{ __('Upload a .csv or .txt file with this header row:') }}
-                    <code class="rounded bg-zinc-100 px-1 py-0.5 font-mono text-sm dark:bg-zinc-800">name,dupr_id,dupr_rating</code>
+                    <code class="rounded bg-zinc-100 px-1 py-0.5 font-mono text-sm dark:bg-zinc-800">name,dupr_id,dupr_rating,gender</code>
                 </flux:text>
                 <flux:text size="sm" class="mt-1">
-                    {{ __('Only name is required. Players are matched by DUPR ID, then by name. Blank values never erase existing data. Up to :rows rows and :size.', ['rows' => config('pickleq.import_max_rows'), 'size' => number_format(config('pickleq.import_max_bytes') / 1048576, 0).' MB']) }}
+                    {{ __('Only name is required. gender is optional (man, woman, m, w, male or female). Players are matched by DUPR ID, then by name. Blank values never erase existing data. Up to :rows rows and :size.', ['rows' => config('pickleq.import_max_rows'), 'size' => number_format(config('pickleq.import_max_bytes') / 1048576, 0).' MB']) }}
                     <button type="button" wire:click="downloadSample" class="font-medium underline" data-test="download-sample">{{ __('Download a sample CSV') }}</button>
                 </flux:text>
             </div>
@@ -559,6 +564,7 @@ new #[Title('Players')] class extends Component {
                                     <th scope="col" class="px-3 py-2 text-start font-medium">{{ __('Name') }}</th>
                                     <th scope="col" class="px-3 py-2 text-start font-medium">{{ __('DUPR ID') }}</th>
                                     <th scope="col" class="px-3 py-2 text-start font-medium">{{ __('Rating') }}</th>
+                                    <th scope="col" class="px-3 py-2 text-start font-medium">{{ __('Gender') }}</th>
                                     <th scope="col" class="px-3 py-2 text-start font-medium">{{ __('Notes') }}</th>
                                 </tr>
                             </thead>
@@ -574,6 +580,7 @@ new #[Title('Players')] class extends Component {
                                         <td class="px-3 py-2 font-medium">{{ $row->data['name'] }}</td>
                                         <td class="px-3 py-2 font-mono">{{ $row->data['dupr_id'] ?? '–' }}</td>
                                         <td class="px-3 py-2 tabular-nums">{{ $row->data['dupr_rating'] ?? '–' }}</td>
+                                        <td class="px-3 py-2" data-test="import-gender">{{ $row->gender === null ? '–' : \App\Enums\Gender::from($row->gender)->label() }}</td>
                                         <td class="px-3 py-2 text-zinc-600 dark:text-zinc-400">{{ implode(' ', $row->messages) }}</td>
                                     </tr>
                                 @endforeach
@@ -617,6 +624,12 @@ new #[Title('Players')] class extends Component {
                 autocomplete="off"
                 data-test="nickname-input"
             />
+
+            <flux:select wire:model="gender" :label="__('Gender (optional)')" :description="__('Needed for mixed doubles.')" data-test="gender-input">
+                <flux:select.option value="">{{ __('Not set') }}</flux:select.option>
+                <flux:select.option value="man">{{ __('Man') }}</flux:select.option>
+                <flux:select.option value="woman">{{ __('Woman') }}</flux:select.option>
+            </flux:select>
 
             <div class="grid gap-4 sm:grid-cols-2">
                 <flux:input

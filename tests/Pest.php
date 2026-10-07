@@ -1,9 +1,17 @@
 <?php
 
 use App\Enums\ClubRole;
+use App\Enums\Gender;
+use App\Enums\MatchStatus;
+use App\Enums\RotationMode;
 use App\Models\Club;
+use App\Models\GameMatch;
+use App\Models\Player;
+use App\Models\PlaySession;
+use App\Models\SessionPlayer;
 use App\Models\User;
 use App\Notifications\ClubInvitationNotification;
+use App\Services\CheckInService;
 use App\Services\InvitationService;
 use App\Services\RosterImport\RosterImportPreview;
 use App\Services\RosterImport\RosterImportRow;
@@ -84,4 +92,80 @@ function rowsByLine(RosterImportPreview $preview): array
     }
 
     return $out;
+}
+
+/**
+ * A live session with $n players checked in through the service (so Up Next staging runs).
+ *
+ * @param  array<string, mixed>  $attrs
+ * @return array{0: PlaySession, 1: list<Player>}
+ */
+function board(int $n, array $attrs = []): array
+{
+    $club = Club::factory()->create();
+    $session = PlaySession::factory()->for($club)->live()->create($attrs);
+    $players = [];
+    for ($i = 0; $i < $n; $i++) {
+        $player = Player::factory()->for($club)->manual(3)->create();
+        app(CheckInService::class)->checkIn($session, $player);
+        $players[] = $player;
+        test()->travel(1)->seconds();
+    }
+
+    return [$session->fresh(), $players];
+}
+
+function stagedOf(PlaySession $s)
+{
+    return GameMatch::query()->where('play_session_id', $s->id)->where('status', MatchStatus::Staged->value)->orderBy('id')->get();
+}
+
+function matchIds(GameMatch $m): array
+{
+    return $m->matchPlayers()->pluck('player_id')->map(fn ($i) => (int) $i)->sort()->values()->all();
+}
+
+function entryOf(PlaySession $s, Player $p): SessionPlayer
+{
+    return SessionPlayer::query()->where('play_session_id', $s->id)->where('player_id', $p->id)->firstOrFail();
+}
+
+/**
+ * A live mixed session. $genders is a string like 'MMWWM' (M man, W woman, N no gender),
+ * checked in left to right.
+ *
+ * @param  array<string, mixed>  $attrs
+ * @return array{0: PlaySession, 1: list<Player>}
+ */
+function mixedBoard(string $genders, array $attrs = []): array
+{
+    $club = Club::factory()->create();
+    $session = PlaySession::factory()->for($club)->live()->create(['rotation_mode' => RotationMode::Mixed, ...$attrs]);
+    $players = [];
+    foreach (str_split($genders) as $g) {
+        $player = Player::factory()->for($club)->manual(3)->create(['gender' => match ($g) {
+            'M' => Gender::Man,
+            'W' => Gender::Woman,
+            default => null,
+        }]);
+        app(CheckInService::class)->checkIn($session, $player);
+        $players[] = $player;
+        test()->travel(1)->seconds();
+    }
+
+    return [$session->fresh(), $players];
+}
+
+/** @return list<list<string>> the sorted genders of each team */
+function teamGenders(GameMatch $match): array
+{
+    return $match->matchPlayers()->with('player')->get()
+        ->groupBy(fn ($mp) => $mp->team->value)
+        ->map(fn ($rows) => $rows->map(fn ($mp) => $mp->player->gender->value)->sort()->values()->all())
+        ->values()->all();
+}
+
+function genderedPlayerOf(GameMatch $match, string $gender): Player
+{
+    return Player::findOrFail($match->matchPlayers()->whereHas('player', fn ($q) => $q->where('gender', $gender))->first()->player_id);
 }

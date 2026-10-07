@@ -15,13 +15,16 @@ use App\Models\SessionPlayer;
  * SessionBoard.
  *
  * @phpstan-type PublicPlayer array{id: string, name: string}
- * @phpstan-type PublicMatch array{teams: array{A: list<PublicPlayer>, B: list<PublicPlayer>}, player_ids: list<string>, elapsed_minutes: int|null}
+ * @phpstan-type PublicMatch array{teams: array{A: list<PublicPlayer>, B: list<PublicPlayer>}, player_ids: list<string>, group: int|null, elapsed_minutes: int|null}
+ * @phpstan-type PublicGroup array{index: int, label: string, courts: list<int>}
  * @phpstan-type PublicSnapshot array{
  *     name: string,
  *     status: string,
+ *     mode: string,
  *     courts: list<array{court: int, match: PublicMatch|null}>,
+ *     groups: list<PublicGroup>,
  *     up_next: list<PublicMatch>,
- *     waiting: list<array{position: int, id: string, name: string, estimate_minutes: int|null}>,
+ *     waiting: list<array{position: int, id: string, name: string, estimate_minutes: int|null, group: int|null, group_position: int|null}>,
  *     on_break: list<PublicPlayer>,
  *     players: list<PublicPlayer>
  * }
@@ -41,9 +44,10 @@ class PublicSessionView
     {
         $name = $session->name;
         $status = $session->status->value;
+        $mode = $session->rotation_mode->value;
 
         if ($session->status !== SessionStatus::Live) {
-            return ['name' => $name, 'status' => $status, 'courts' => [], 'up_next' => [], 'waiting' => [], 'on_break' => [], 'players' => []];
+            return ['name' => $name, 'mode' => $mode, 'status' => $status, 'courts' => [], 'groups' => [], 'up_next' => [], 'waiting' => [], 'on_break' => [], 'players' => []];
         }
 
         $names = [];
@@ -58,7 +62,7 @@ class PublicSessionView
         $publicName = fn (int $id): string => $names[$id] ?? '';
         $publicId = fn (int $id): string => $pub[$id] ?? '';
 
-        /** @param  array{teams: array{A: list<array{id: int}>, B: list<array{id: int}>}, player_ids: list<int>, elapsed_minutes: int|null}  $row */
+        /** @param  array{teams: array{A: list<array{id: int}>, B: list<array{id: int}>}, player_ids: list<int>, group: int|null, elapsed_minutes: int|null}  $row */
         $match = function (array $row) use ($publicName, $publicId): array {
             $teams = ['A' => [], 'B' => []];
             foreach (['A', 'B'] as $team) {
@@ -70,6 +74,7 @@ class PublicSessionView
             return [
                 'teams' => $teams,
                 'player_ids' => array_values(array_map($publicId, $row['player_ids'])),
+                'group' => $row['group'],
                 'elapsed_minutes' => $row['elapsed_minutes'],
             ];
         };
@@ -79,9 +84,23 @@ class PublicSessionView
             $courts[] = ['court' => $c['court'], 'match' => $c['match'] === null ? null : $match($c['match'])];
         }
 
+        $waitingRows = $this->board->waiting($session);
         $waiting = [];
-        foreach ($this->board->waiting($session) as $i => $row) {
-            $waiting[] = ['position' => $i + 1, 'id' => $publicId($row['id']), 'name' => $publicName($row['id']), 'estimate_minutes' => $row['estimate_minutes']];
+        foreach ($waitingRows as $i => $row) {
+            $waiting[] = [
+                'position' => $i + 1,
+                'id' => $publicId($row['id']),
+                'name' => $publicName($row['id']),
+                'estimate_minutes' => $row['estimate_minutes'],
+                'group' => $row['group'],
+                'group_position' => $row['group_position'],
+            ];
+        }
+
+        // Group labels only ("Courts 1–2"): the star ranges are never public.
+        $groups = [];
+        foreach ($this->board->groups($session, $waitingRows) as $g) {
+            $groups[] = ['index' => $g['index'], 'label' => $g['label'], 'courts' => $g['courts']];
         }
 
         $onBreak = [];
@@ -102,7 +121,9 @@ class PublicSessionView
         return [
             'name' => $name,
             'status' => $status,
+            'mode' => $mode,
             'courts' => $courts,
+            'groups' => $groups,
             'up_next' => array_map($match, $this->board->staged($session)),
             'waiting' => $waiting,
             'on_break' => $onBreak,

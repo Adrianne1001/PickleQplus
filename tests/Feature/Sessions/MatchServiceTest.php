@@ -20,42 +20,6 @@ function mService(): MatchService
     return app(MatchService::class);
 }
 
-/**
- * A live session with $n players checked in through the service (so Up Next staging runs).
- *
- * @param  array<string, mixed>  $attrs
- * @return array{0: PlaySession, 1: list<Player>}
- */
-function board(int $n, array $attrs = []): array
-{
-    $club = Club::factory()->create();
-    $session = PlaySession::factory()->for($club)->live()->create($attrs);
-    $players = [];
-    for ($i = 0; $i < $n; $i++) {
-        $player = Player::factory()->for($club)->manual(3)->create();
-        app(CheckInService::class)->checkIn($session, $player);
-        $players[] = $player;
-        test()->travel(1)->seconds();
-    }
-
-    return [$session->fresh(), $players];
-}
-
-function stagedOf(PlaySession $s)
-{
-    return GameMatch::query()->where('play_session_id', $s->id)->where('status', MatchStatus::Staged->value)->orderBy('id')->get();
-}
-
-function matchIds(GameMatch $m): array
-{
-    return $m->matchPlayers()->pluck('player_id')->map(fn ($i) => (int) $i)->sort()->values()->all();
-}
-
-function entryOf(PlaySession $s, Player $p): SessionPlayer
-{
-    return SessionPlayer::query()->where('play_session_id', $s->id)->where('player_id', $p->id)->firstOrFail();
-}
-
 test('four waiting players stage one Up Next match with teams and slots and no court', function () {
     [$session, $players] = board(3);
     expect(stagedOf($session))->toHaveCount(0);

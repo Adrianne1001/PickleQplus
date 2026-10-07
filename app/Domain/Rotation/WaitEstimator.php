@@ -31,6 +31,27 @@ final class WaitEstimator
         array $playingElapsedMinutes,
         float $averageMatchMinutes,
     ): int {
+        $matchIndex = max(0, $stagedCount) + intdiv(max(0, $queuePosition), 4);
+
+        return $this->estimateFromMatchIndex($matchIndex, $courts, $playingElapsedMinutes, $averageMatchMinutes);
+    }
+
+    /**
+     * Minutes until the match at start-order index $matchIndex (0 = first match
+     * to start, staged matches first) gets a court.
+     *
+     * @param  int  $matchIndex  0-based position in the start order
+     * @param  int  $courts  total courts in the session
+     * @param  array<int|float>  $playingElapsedMinutes  minutes elapsed in each playing match
+     * @param  float  $averageMatchMinutes  average match duration
+     */
+    public function estimateFromMatchIndex(
+        int $matchIndex,
+        int $courts,
+        array $playingElapsedMinutes,
+        float $averageMatchMinutes,
+    ): int {
+        $matchIndex = max(0, $matchIndex);
         $average = max(0.0, $averageMatchMinutes);
         $free = [];
         foreach ($playingElapsedMinutes as $elapsed) {
@@ -42,8 +63,6 @@ final class WaitEstimator
         if ($free === []) {
             return 0;
         }
-
-        $matchIndex = max(0, $stagedCount) + intdiv(max(0, $queuePosition), 4);
 
         $start = 0.0;
         for ($m = 0; $m <= $matchIndex; $m++) {

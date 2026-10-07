@@ -2,8 +2,10 @@
 
 namespace App\Services;
 
+use App\Enums\Gender;
 use App\Enums\LateArrivalPolicy;
 use App\Enums\MatchStatus;
+use App\Enums\RotationMode;
 use App\Enums\SessionPlayerStatus;
 use App\Enums\SessionStatus;
 use App\Events\PlaySessionChanged;
@@ -83,6 +85,82 @@ class CheckInService
 
             return $entry;
         });
+    }
+
+    /**
+     * Set (or clear, with null) a player's gender from the board. Staff are the
+     * authority, so this overwrites an existing value. Runs in the session lock and
+     * refills, so a mode that was waiting for this player can stage a match at once.
+     * Allowed while the session is draft or live.
+     *
+     * @throws ValidationException
+     */
+    public function setGender(PlaySession $session, Player $player, Gender|string|null $gender): Player
+    {
+        $parsed = Gender::tryParse($gender);
+        if ($parsed === null && $gender !== null && (! is_string($gender) || trim($gender) !== '')) {
+            throw ValidationException::withMessages(['gender' => 'Gender must be man or woman.']);
+        }
+
+        return DB::transaction(function () use ($session, $player, $parsed): Player {
+            $this->lockSession($session);
+            $this->guardOpen($session);
+
+            if ($player->club_id !== $session->club_id) {
+                throw ValidationException::withMessages(['player' => 'That player does not belong to this club.']);
+            }
+
+            $fresh = Player::query()->whereKey($player->id)->where('club_id', $session->club_id)->lockForUpdate()->firstOrFail();
+            $changed = $fresh->gender !== $parsed;
+            $fresh->forceFill(['gender' => $parsed])->save();
+            $player->setRawAttributes($fresh->getAttributes(), true);
+
+            if ($changed && $session->isLive() && $session->rotation_mode === RotationMode::Mixed) {
+                // A staged match built on the old gender may no longer be 1 man + 1 woman per team.
+                $this->voidStagedWith($session, $player);
+            }
+
+            $this->matches->refill($session);
+            PlaySessionChanged::dispatch($session->id);
+
+            return $player;
+        });
+    }
+
+    /**
+     * A player's gender was changed outside the board (the staff player form).
+     * In every live mixed session the player is checked into, void their staged
+     * match, refill and notify, exactly like setGender. Runs under the session lock.
+     */
+    public function gendersChanged(Player $player): void
+    {
+        $sessions = PlaySession::query()
+            ->where('club_id', $player->club_id)
+            ->where('status', SessionStatus::Live->value)
+            ->where('rotation_mode', RotationMode::Mixed->value)
+            ->whereIn('id', SessionPlayer::query()->select('play_session_id')->where('player_id', $player->id))
+            ->get();
+
+        foreach ($sessions as $session) {
+            DB::transaction(function () use ($session, $player): void {
+                $this->lockSession($session);
+                if (! $session->isLive() || $session->rotation_mode !== RotationMode::Mixed) {
+                    return;
+                }
+                $this->voidStagedWith($session, $player);
+                $this->matches->refill($session);
+                PlaySessionChanged::dispatch($session->id);
+            });
+        }
+    }
+
+    private function voidStagedWith(PlaySession $session, Player $player): void
+    {
+        GameMatch::query()
+            ->where('play_session_id', $session->id)
+            ->where('status', MatchStatus::Staged->value)
+            ->whereIn('id', MatchPlayer::query()->select('match_id')->where('player_id', $player->id))
+            ->update(['status' => MatchStatus::Void->value, 'updated_at' => now()]);
     }
 
     /**

@@ -67,6 +67,13 @@ return [
         'skipped_priority' => 2,
         'window' => 8,
         'avg_match_minutes' => 15,
+        'winners_stay_max_wins' => 2,
     ],
+
+    /*
+    | Rotation modes a session may currently be set to (P7.4). Each later
+    | P7.4 item adds its mode here when it lands.
+    */
+    'rotation_modes_enabled' => ['balanced', 'mixed', 'skill_courts'],
 
 ];

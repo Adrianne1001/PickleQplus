@@ -11,6 +11,9 @@
                 @if ($player->nickname)
                     <span class="font-normal text-zinc-500">"{{ $player->nickname }}"</span>
                 @endif
+                @if ($player->gender)
+                    <flux:badge size="sm" color="zinc" data-test="player-gender">{{ $player->gender->label() }}</flux:badge>
+                @endif
                 <flux:badge size="sm" :color="$player->active ? 'green' : 'zinc'">{{ $player->active ? __('Active') : __('Inactive') }}</flux:badge>
             </flux:heading>
             <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-zinc-600 dark:text-zinc-300">

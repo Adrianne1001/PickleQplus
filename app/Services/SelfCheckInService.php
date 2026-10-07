@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Enums\Gender;
 use App\Enums\RatingSource;
 use App\Enums\SessionPlayerStatus;
 use App\Enums\SessionStatus;
@@ -26,7 +27,7 @@ use Illuminate\Validation\ValidationException;
  * page opened with a replaced QR stops working. Players are identified
  * publicly by players.public_id, never by their sequential id.
  *
- * @phpstan-type SearchRow array{id: string, name: string, nickname: string|null, status: 'waiting'|'playing'|'break'|null}
+ * @phpstan-type SearchRow array{id: string, name: string, nickname: string|null, needs_gender: bool, status: 'waiting'|'playing'|'break'|null}
  * @phpstan-type CheckInResult array{result: string, player_id: string, public_name: string}
  */
 class SelfCheckInService
@@ -101,6 +102,8 @@ class SelfCheckInService
                 'id' => (string) $p->public_id,
                 'name' => $p->name,
                 'nickname' => $p->nickname,
+                // Only whether the player may still be asked; the gender itself is never exposed.
+                'needs_gender' => $p->gender === null,
                 'status' => match ($status) {
                     SessionPlayerStatus::Waiting => 'waiting',
                     SessionPlayerStatus::Playing => 'playing',
@@ -115,7 +118,7 @@ class SelfCheckInService
 
     /**
      * Check an existing club player in (or return them from break). A nickname
-     * is stored only when the player has none. Already being checked in is a
+     * and a gender are stored only when the player has none (never overwritten). Already being checked in is a
      * result, not an error. result: checked_in, returned_from_break or
      * already_checked_in.
      *
@@ -123,17 +126,18 @@ class SelfCheckInService
      *
      * @throws ValidationException
      */
-    public function checkIn(PlaySession $session, string $token, string $playerPublicId, ?string $nickname, string $ip): array
+    public function checkIn(PlaySession $session, string $token, string $playerPublicId, ?string $nickname, string $ip, ?string $gender = null): array
     {
         $this->throttle("selfcheckin:submit:{$ip}:{$session->id}", self::SUBMITS_PER_MINUTE, 60, 'Too many attempts. Please wait a minute and try again.');
 
+        $gender = $this->parseGender($gender);
         $nickname = Player::normalizeNickname($nickname);
         if ($nickname !== null && mb_strlen($nickname) > 20) {
             throw ValidationException::withMessages(['nickname' => 'The nickname may not be longer than 20 characters.']);
         }
 
         try {
-            return DB::transaction(function () use ($session, $token, $playerPublicId, $nickname): array {
+            return DB::transaction(function () use ($session, $token, $playerPublicId, $nickname, $gender): array {
                 $this->lockSession($session);
                 $this->assertUsable($session, $token);
 
@@ -162,6 +166,14 @@ class SelfCheckInService
                     default => 'checked_in',
                 };
 
+                // Saved on the player row this transaction already locks, before check-in, so the
+                // refill inside checkIn() sees it. An UPDATE takes no read snapshot, so the
+                // race-safety rule above still holds.
+                $genderSet = $gender !== null && $player->gender === null;
+                if ($genderSet) {
+                    $player->forceFill(['gender' => $gender])->save();
+                }
+
                 $this->checkIns->checkIn($session, $player);
 
                 if ($nickname !== null && $player->nickname === null) {
@@ -172,6 +184,11 @@ class SelfCheckInService
                     if ($result === 'already_checked_in') {
                         PlaySessionChanged::dispatch($session->id);
                     }
+                }
+
+                // checkIn() returns early for a player already in, so refill and notify once here.
+                if ($genderSet && $result === 'already_checked_in') {
+                    $this->checkIns->setGender($session, $player, $gender);
                 }
 
                 return [
@@ -192,7 +209,7 @@ class SelfCheckInService
      *
      * @throws ValidationException
      */
-    public function register(PlaySession $session, string $token, string $name, string $nickname, ?string $duprId, int|string $stars, string $ip): array
+    public function register(PlaySession $session, string $token, string $name, string $nickname, ?string $duprId, int|string $stars, string $ip, ?string $gender = null): array
     {
         $this->throttle("selfcheckin:submit:{$ip}:{$session->id}", self::SUBMITS_PER_MINUTE, 60, 'Too many attempts. Please wait a minute and try again.');
 
@@ -200,6 +217,8 @@ class SelfCheckInService
         if (RateLimiter::tooManyAttempts($registerKey, self::REGISTRATIONS_PER_HOUR)) {
             throw ValidationException::withMessages(['throttle' => 'Too many new registrations from this device. Please ask the organizer for help.']);
         }
+
+        $gender = $this->parseGender($gender);
 
         $data = Validator::make([
             'name' => trim($name),
@@ -216,7 +235,7 @@ class SelfCheckInService
         $onRoster = 'You are already on the roster. Search for your name instead.';
 
         try {
-            $result = DB::transaction(function () use ($session, $token, $data, $onRoster): array {
+            $result = DB::transaction(function () use ($session, $token, $data, $gender, $onRoster): array {
                 // Same lock order as PlaySessionService::start(): club, session, then players.
                 Club::query()->whereKey($session->club_id)->lockForUpdate()->firstOrFail();
                 $this->lockSession($session);
@@ -246,6 +265,7 @@ class SelfCheckInService
                 $player->forceFill([
                     'name' => $data['name'],
                     'nickname' => $data['nickname'],
+                    'gender' => $gender,
                     'dupr_id' => $data['dupr_id'],
                     'dupr_rating' => null,
                     'rating_source' => RatingSource::Manual,
@@ -265,6 +285,21 @@ class SelfCheckInService
         RateLimiter::hit($registerKey, 3600);
 
         return $result;
+    }
+
+    /**
+     * Blank is no answer (null). Man, woman, m, w, male, female and f are accepted in any case.
+     *
+     * @throws ValidationException
+     */
+    private function parseGender(?string $gender): ?Gender
+    {
+        if ($gender === null || trim($gender) === '') {
+            return null;
+        }
+
+        return Gender::tryParse($gender)
+            ?? throw ValidationException::withMessages(['gender' => 'Please choose man or woman.']);
     }
 
     /**

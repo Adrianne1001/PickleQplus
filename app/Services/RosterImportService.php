@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Enums\Gender;
 use App\Models\Club;
 use App\Models\Player;
 use App\Rules\DuprPlayerId;
@@ -19,12 +20,13 @@ use InvalidArgumentException;
  * Roster CSV import in two steps: preview() reads and plans, commit() applies.
  *
  * File format: UTF-8 (BOM allowed), header row with `name`, `dupr_id`,
- * `dupr_rating` matched case-insensitively in any order; only `name` is
- * required; extra columns are ignored. Blank lines are ignored.
+ * `dupr_rating` and an optional `gender` (man, woman, m, w, male, female, f, any
+ * case) matched case-insensitively in any order; only `name` is required; extra columns are ignored. Blank lines are ignored.
  *
  * Matching is always inside the given club: by DUPR ID first, then by
  * case-insensitive trimmed name (several name matches is an error).
- * A blank dupr_id or dupr_rating in the file never clears existing values.
+ * A blank dupr_id, dupr_rating or gender in the file never clears existing values.
+ * An invalid gender makes the row an error.
  *
  * Stars: a row with a rating is `dupr` sourced (stars from the club bands,
  * unless an existing player is on a manual override). A new player without a
@@ -74,6 +76,9 @@ class RosterImportService
                 'dupr_rating' => $this->cell($record['cells'], $columns['dupr_rating'] ?? null),
             ];
 
+            $rawGender = $this->cell($record['cells'], $columns['gender'] ?? null);
+            $gender = Gender::tryParse($rawGender);
+
             $duprId = DuprPlayerId::normalize($raw['dupr_id']);
             $rating = $raw['dupr_rating'] === '' ? null : $raw['dupr_rating'];
             $data = [
@@ -83,6 +88,10 @@ class RosterImportService
             ];
 
             $errors = $this->validateRow($raw['name'], $duprId, $rating);
+            if ($rawGender !== '' && $gender === null) {
+                $errors[] = 'Gender "'.$this->limit($rawGender).'" is not valid. Use man or woman (m, w, male, female, f).';
+            }
+            $genderValue = $gender?->value;
 
             // In-file duplicates.
             if ($errors === [] && $duprId !== null && isset($seenDuprIds[$duprId])) {
@@ -107,7 +116,7 @@ class RosterImportService
             }
 
             if ($errors !== []) {
-                $rows[] = new RosterImportRow($line, RosterImportRow::ERROR, $errors, $this->truncated($data));
+                $rows[] = new RosterImportRow($line, RosterImportRow::ERROR, $errors, $this->truncated($data), null, $genderValue);
 
                 continue;
             }
@@ -119,7 +128,7 @@ class RosterImportService
             } else {
                 $named = $byName[$nameKey] ?? [];
                 if (count($named) > 1) {
-                    $rows[] = new RosterImportRow($line, RosterImportRow::ERROR, ['Several existing players match this name; match by DUPR ID instead.'], $data);
+                    $rows[] = new RosterImportRow($line, RosterImportRow::ERROR, ['Several existing players match this name; match by DUPR ID instead.'], $data, null, $genderValue);
 
                     continue;
                 }
@@ -127,29 +136,29 @@ class RosterImportService
 
                 // A name match must never overwrite a different DUPR ID: it could be another person.
                 if ($match !== null && $duprId !== null && $match->dupr_id !== null) {
-                    $rows[] = new RosterImportRow($line, RosterImportRow::ERROR, ['Name matches existing player with a different DUPR ID.'], $data, $match->id);
+                    $rows[] = new RosterImportRow($line, RosterImportRow::ERROR, ['Name matches existing player with a different DUPR ID.'], $data, $match->id, $genderValue);
 
                     continue;
                 }
             }
 
             if ($match === null) {
-                $rows[] = new RosterImportRow($line, RosterImportRow::CREATE, [], $data);
+                $rows[] = new RosterImportRow($line, RosterImportRow::CREATE, [], $data, null, $genderValue);
 
                 continue;
             }
 
             if (isset($targeted[$match->id])) {
-                $rows[] = new RosterImportRow($line, RosterImportRow::ERROR, ["Matches the same player as line {$targeted[$match->id]}."], $data, $match->id);
+                $rows[] = new RosterImportRow($line, RosterImportRow::ERROR, ["Matches the same player as line {$targeted[$match->id]}."], $data, $match->id, $genderValue);
 
                 continue;
             }
             $targeted[$match->id] = $line;
 
             $notes = $match->active ? [] : [self::INACTIVE_MATCH];
-            $rows[] = $this->changes($match, $data) === []
-                ? new RosterImportRow($line, RosterImportRow::SKIP, ['No changes.', ...$notes], $data, $match->id)
-                : new RosterImportRow($line, RosterImportRow::UPDATE, $notes, $data, $match->id);
+            $rows[] = $this->changes($match, $data, $genderValue) === []
+                ? new RosterImportRow($line, RosterImportRow::SKIP, ['No changes.', ...$notes], $data, $match->id, $genderValue)
+                : new RosterImportRow($line, RosterImportRow::UPDATE, $notes, $data, $match->id, $genderValue);
         }
 
         return new RosterImportPreview($club->id, $rows);
@@ -285,6 +294,9 @@ class RosterImportService
             'dupr_id' => $duprId,
             'dupr_rating' => $row->data['dupr_rating'],
         ];
+        if ($row->gender !== null) {
+            $new['gender'] = $row->gender;
+        }
         // Stars are derived from the rating; only unrated players get the default.
         if ($row->data['dupr_rating'] === null) {
             $new['stars'] = (int) config('pickleq.import_default_stars');
@@ -317,7 +329,7 @@ class RosterImportService
             return 'the matched player no longer exists.';
         }
 
-        $changes = $this->changes($player, $row->data);
+        $changes = $this->changes($player, $row->data, $row->gender);
         if ($changes === []) {
             return 'skipped';
         }
@@ -383,9 +395,9 @@ class RosterImportService
      * surrounding whitespace is not a change.
      *
      * @param  array{name: string, dupr_id: string|null, dupr_rating: string|null}  $data
-     * @return array{name?: string, dupr_id?: string, dupr_rating?: string}
+     * @return array{name?: string, dupr_id?: string, dupr_rating?: string, gender?: string}
      */
-    private function changes(Player $player, array $data): array
+    private function changes(Player $player, array $data, ?string $gender = null): array
     {
         $changes = [];
 
@@ -400,6 +412,9 @@ class RosterImportService
             || number_format((float) $player->dupr_rating, 3, '.', '') !== $data['dupr_rating']
         )) {
             $changes['dupr_rating'] = $data['dupr_rating'];
+        }
+        if ($gender !== null && $gender !== $player->gender?->value) {
+            $changes['gender'] = $gender;
         }
 
         return $changes;
@@ -508,7 +523,7 @@ class RosterImportService
         $columns = [];
         foreach ($cells as $i => $cell) {
             $key = mb_strtolower(trim((string) $cell));
-            if (! in_array($key, ['name', 'dupr_id', 'dupr_rating'], true)) {
+            if (! in_array($key, ['name', 'dupr_id', 'dupr_rating', 'gender'], true)) {
                 continue;
             }
             if (isset($columns[$key])) {

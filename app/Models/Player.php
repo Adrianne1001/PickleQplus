@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\Gender;
 use App\Enums\RatingSource;
 use App\Rules\DuprPlayerId;
 use Database\Factories\PlayerFactory;
@@ -18,6 +19,7 @@ use Illuminate\Support\Carbon;
  * @property string $name
  * @property string|null $public_id
  * @property string|null $nickname
+ * @property Gender|null $gender
  * @property Carbon|null $self_registered_at
  * @property int|null $self_registered_session_id
  * @property string|null $dupr_id
@@ -28,7 +30,7 @@ use Illuminate\Support\Carbon;
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  */
-#[Fillable(['name', 'nickname', 'dupr_id', 'dupr_rating', 'stars', 'rating_source', 'active'])]
+#[Fillable(['name', 'nickname', 'gender', 'dupr_id', 'dupr_rating', 'stars', 'rating_source', 'active'])]
 class Player extends Model
 {
     /** @use HasFactory<PlayerFactory> */
@@ -43,6 +45,7 @@ class Player extends Model
             'dupr_rating' => 'decimal:3',
             'stars' => 'integer',
             'rating_source' => RatingSource::class,
+            'gender' => Gender::class,
             'active' => 'boolean',
             'self_registered_at' => 'datetime',
         ];

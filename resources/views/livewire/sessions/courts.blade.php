@@ -1,3 +1,12 @@
+@php
+    $courtGroup = [];
+    foreach ($groups as $g) {
+        foreach ($g['courts'] as $n) {
+            $courtGroup[$n] = $g['label'];
+        }
+    }
+@endphp
+
 <div class="space-y-4" wire:poll.10s.visible data-test="courts-panel">
     <flux:heading size="lg">{{ __('Courts') }}</flux:heading>
 
@@ -14,7 +23,12 @@
             @php($match = $row['match'])
             <div class="rounded-xl border border-zinc-200 p-4 dark:border-zinc-700" wire:key="court-{{ $row['court'] }}" data-test="court" data-court="{{ $row['court'] }}">
                 <div class="mb-3 flex items-center justify-between">
-                    <span class="text-lg font-semibold">{{ __('Court :n', ['n' => $row['court']]) }}</span>
+                    <span class="flex flex-wrap items-baseline gap-2">
+                        <span class="text-lg font-semibold">{{ __('Court :n', ['n' => $row['court']]) }}</span>
+                        @if (isset($courtGroup[$row['court']]))
+                            <span class="text-sm text-zinc-600 dark:text-zinc-300" data-test="court-group">{{ $courtGroup[$row['court']] }}</span>
+                        @endif
+                    </span>
                     @if ($match)
                         <flux:badge color="green" size="sm">{{ __(':min min', ['min' => $match['elapsed_minutes']]) }}</flux:badge>
                     @else
@@ -23,7 +37,7 @@
                 </div>
 
                 @if ($match)
-                    <x-match-teams :match="$match" />
+                    <x-match-teams :match="$match" :mixed="$mixed" />
 
                     <div class="mt-3 grid grid-cols-2 gap-2">
                         <flux:button variant="primary" class="min-h-12" wire:click="openPanel('score', {{ $match['id'] }})" data-test="score-button">{{ __('Enter score') }}</flux:button>

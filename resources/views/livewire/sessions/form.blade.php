@@ -26,6 +26,65 @@
             <flux:input wire:model="up_next_count" type="number" min="1" max="3" inputmode="numeric" :label="__('Up Next slots')" required :disabled="$ended" />
         </div>
 
+        <flux:select
+            wire:model="rotation_mode"
+            :label="__('Rotation mode')"
+            :disabled="$ended || count($modes) < 2"
+            data-test="rotation-mode"
+        >
+            @foreach ($modes as $mode)
+                <flux:select.option value="{{ $mode->value }}">{{ $mode->label() }}</flux:select.option>
+            @endforeach
+        </flux:select>
+        <flux:text class="-mt-4 text-sm" data-test="rotation-mode-help">
+            {{ match ($rotation_mode) {
+                'mixed' => __('Every team is 1 man + 1 woman. Up Next waits until 2 of each are free.'),
+                'balanced' => __('Fair rotation: fewest games first, mixing partners and opponents.'),
+                'skill_courts' => __('Courts only take matches from their own group, even when idle.'),
+                default => '',
+            } }}
+        </flux:text>
+
+        @if ($rotation_mode === 'skill_courts')
+            <div class="space-y-3 rounded-lg border border-zinc-200 p-4 dark:border-zinc-700" data-test="skill-groups-editor">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                    <flux:heading>{{ __('Skill groups') }}</flux:heading>
+                    @unless ($ended)
+                        <flux:button type="button" size="sm" variant="ghost" wire:click="resetGroups" data-test="reset-groups">{{ __('Reset to defaults') }}</flux:button>
+                    @endunless
+                </div>
+
+                @foreach ($skill_groups as $i => $group)
+                    <div class="grid grid-cols-2 items-end gap-3 sm:grid-cols-5" wire:key="skill-group-{{ $i }}" data-test="skill-group-row">
+                        <flux:input wire:model="skill_groups.{{ $i }}.from_court" type="number" min="1" inputmode="numeric" :label="__('From court')" :disabled="$ended" data-test="group-from" />
+                        <flux:input wire:model="skill_groups.{{ $i }}.to_court" type="number" min="1" inputmode="numeric" :label="__('To court')" :disabled="$ended" data-test="group-to" />
+                        <flux:input wire:model="skill_groups.{{ $i }}.min_stars" type="number" min="1" max="6" inputmode="numeric" :label="__('Min ★')" :disabled="$ended" data-test="group-min" />
+                        <flux:input wire:model="skill_groups.{{ $i }}.max_stars" type="number" min="1" max="6" inputmode="numeric" :label="__('Max ★')" :disabled="$ended" data-test="group-max" />
+                        @unless ($ended)
+                            <flux:button type="button" variant="subtle" class="col-span-2 min-h-10 sm:col-span-1" wire:click="removeGroup({{ $i }})" aria-label="{{ __('Remove group :n', ['n' => $i + 1]) }}" data-test="remove-group">{{ __('Remove') }}</flux:button>
+                        @endunless
+                    </div>
+                @endforeach
+
+                @unless ($ended)
+                    <flux:button type="button" size="sm" wire:click="addGroup" data-test="add-group">{{ __('Add group') }}</flux:button>
+                @endunless
+
+                <flux:error name="mode_settings.skill_groups" />
+            </div>
+        @endif
+
+        @if ($confirmingMode)
+            <flux:callout variant="warning" icon="exclamation-triangle" data-test="mode-confirm">
+                <flux:callout.heading>{{ __('Change the rotation mode?') }}</flux:callout.heading>
+                <flux:callout.text>{{ __('Up Next matches will be cleared, and matches being played carry on.') }}</flux:callout.text>
+                <x-slot name="actions">
+                    <flux:button type="button" variant="primary" wire:click="confirmModeChange" data-test="mode-confirm-button">{{ __('Change mode and save') }}</flux:button>
+                    <flux:button type="button" variant="ghost" wire:click="cancelModeChange" data-test="mode-cancel-button">{{ __('Keep current mode') }}</flux:button>
+                </x-slot>
+            </flux:callout>
+        @endif
+
         <flux:field variant="inline">
             <flux:checkbox wire:model="auto_fill" :disabled="$ended" data-test="auto-fill" />
             <flux:label>{{ __('Auto-fill courts') }}</flux:label>

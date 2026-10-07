@@ -120,7 +120,7 @@ test('start on a chosen court', function () {
     $match = stagedMatch($session);
 
     Livewire::actingAs($user)->test(UpNext::class, ['session' => $session])
-        ->set('courtChoice', '3')
+        ->set('courtChoice.0', '3')
         ->call('start', $match->id)
         ->assertHasNoErrors();
 

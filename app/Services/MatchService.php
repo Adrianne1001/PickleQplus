@@ -2,12 +2,6 @@
 
 namespace App\Services;
 
-use App\Domain\Rotation\BalancedRotationEngine;
-use App\Domain\Rotation\Candidate;
-use App\Domain\Rotation\MatchResult;
-use App\Domain\Rotation\PairHistory;
-use App\Domain\Rotation\RotationEngine;
-use App\Domain\Rotation\Weights;
 use App\Domain\Scoring\ScoreValidator;
 use App\Enums\MatchStatus;
 use App\Enums\SessionPlayerStatus;
@@ -18,6 +12,8 @@ use App\Models\MatchPlayer;
 use App\Models\Player;
 use App\Models\PlaySession;
 use App\Models\SessionPlayer;
+use App\Services\Rotation\RotationQueries;
+use App\Services\Rotation\RotationStrategies;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -60,14 +56,20 @@ class MatchService
                 throw ValidationException::withMessages(['match' => 'Every player in the match must be waiting.']);
             }
 
+            $allowed = RotationStrategies::for($session)->allowedCourts($session, $match);
+            $restricted = count($allowed) < $session->courts;
+
             if ($courtNo === null) {
-                $courtNo = $this->lowestFreeCourt($session);
+                $courtNo = $this->queries($session)->lowestFreeCourtIn($allowed);
                 if ($courtNo === null) {
-                    throw ValidationException::withMessages(['court' => 'No court is free.']);
+                    throw ValidationException::withMessages(['court' => $restricted ? "No court is free in this match's skill group." : 'No court is free.']);
                 }
             } else {
                 if ($courtNo < 1 || $courtNo > $session->courts) {
                     throw ValidationException::withMessages(['court' => 'That court does not exist in this session.']);
+                }
+                if (! in_array($courtNo, $allowed, true)) {
+                    throw ValidationException::withMessages(['court' => "That court is not in this match's skill group."]);
                 }
                 if (in_array($courtNo, $this->busyCourts($session), true)) {
                     throw ValidationException::withMessages(['court' => 'That court is in use.']);
@@ -106,6 +108,8 @@ class MatchService
                 }
                 $entry->save();
             }
+
+            RotationStrategies::for($session)->afterFinish($session, $this->queries($session), $match);
         });
     }
 
@@ -235,6 +239,12 @@ class MatchService
             }
 
             $this->requireAvailable($session, $in);
+            // Re-read both players under the session lock (session, then player order) so a concurrent
+            // gender change cannot slip past the mode's swap guard.
+            $locked = Player::query()->whereIn('id', [$out->id, $in->id])->orderBy('id')->lockForUpdate()->get()->keyBy('id');
+            $freshOut = $locked->get($out->id) ?? $out;
+            $freshIn = $locked->get($in->id) ?? $in;
+            RotationStrategies::for($session)->guardSwap($session, $match, $freshOut, $freshIn);
 
             $row->player_id = $in->id;
             $row->save();
@@ -271,6 +281,7 @@ class MatchService
                 throw ValidationException::withMessages(['player' => 'That player is not in this match.']);
             }
 
+            $queries = $this->queries($session);
             $entries = $this->entries($session, array_values($rows->pluck('player_id')->map(fn ($id): int => (int) $id)->all()))->keyBy('player_id');
             $teamA = [];
             $teamB = [];
@@ -280,18 +291,13 @@ class MatchService
                     continue;
                 }
                 if ($other->team === Team::A) {
-                    $teamA[] = $this->candidate($entry);
+                    $teamA[] = $queries->candidate($entry);
                 } else {
-                    $teamB[] = $this->candidate($entry);
+                    $teamB[] = $queries->candidate($entry);
                 }
             }
 
-            $result = $this->engine()->pickReplacement(
-                $teamA,
-                $teamB,
-                $this->candidates($session),
-                $this->history($session, $match->id),
-            );
+            $result = RotationStrategies::for($session)->pickReplacement($session, $queries, $teamA, $teamB, $match->id);
 
             if ($result === null) {
                 throw ValidationException::withMessages(['player' => 'No waiting player is available to take that slot.']);
@@ -343,24 +349,7 @@ class MatchService
             $ids = $this->playerIds($match);
             $this->markVoid($match);
 
-            // Run the engine once with each old player left out and keep the cheapest result,
-            // so the exact same four can never come back while a different group exists.
-            // Only when every run finds nothing (fewer than 5 waiting) may refill() re-stage them.
-            $candidates = $this->candidates($session);
-            $history = $this->history($session);
-            $best = null;
-            foreach ($ids as $leaveOut) {
-                $result = $this->engine()->pickMatch(
-                    array_values(array_filter($candidates, fn (Candidate $c): bool => $c->id !== $leaveOut)),
-                    $history,
-                );
-                if ($result !== null && ($best === null || $result->cost < $best->cost)) {
-                    $best = $result;
-                }
-            }
-            if ($best !== null) {
-                $this->createStaged($session, $best);
-            }
+            RotationStrategies::for($session)->reroll($session, $this->queries($session), $ids, $match);
         });
     }
 
@@ -379,19 +368,11 @@ class MatchService
             return;
         }
 
-        $staged = GameMatch::query()
-            ->where('play_session_id', $session->id)
-            ->where('status', MatchStatus::Staged->value)
-            ->orderByDesc('id')
-            ->get();
-        foreach ($staged->take(max(0, $staged->count() - $session->up_next_count)) as $surplus) {
-            $this->markVoid($surplus);
-        }
+        $strategy = RotationStrategies::for($session);
+        $queries = $this->queries($session);
 
         do {
-            while ($this->stagedCount($session) < $session->up_next_count && $this->stage($session) !== null) {
-                // keep staging
-            }
+            $strategy->fillUpNext($session, $queries);
 
             $started = $session->auto_fill && $this->startOldest($session);
         } while ($started);
@@ -430,53 +411,28 @@ class MatchService
         });
     }
 
-    /**
-     * @param  list<int>  $exclude
-     */
-    private function stage(PlaySession $session, array $exclude = []): ?GameMatch
-    {
-        $result = $this->engine()->pickMatch($this->candidates($session, $exclude), $this->history($session));
-
-        return $result === null ? null : $this->createStaged($session, $result);
-    }
-
-    private function createStaged(PlaySession $session, MatchResult $result): GameMatch
-    {
-        $match = new GameMatch(['dupr_eligible' => true]);
-        $match->play_session_id = $session->id;
-        $match->status = MatchStatus::Staged;
-        $match->save();
-
-        foreach ([[Team::A, $result->teamA], [Team::B, $result->teamB]] as [$team, $ids]) {
-            foreach ($ids as $i => $playerId) {
-                MatchPlayer::query()->create([
-                    'match_id' => $match->id,
-                    'player_id' => $playerId,
-                    'team' => $team,
-                    'slot' => $i + 1,
-                ]);
-            }
-        }
-
-        return $match;
-    }
-
     private function startOldest(PlaySession $session): bool
     {
-        $court = $this->lowestFreeCourt($session);
-        $match = GameMatch::query()
+        $strategy = RotationStrategies::for($session);
+        $queries = $this->queries($session);
+        $staged = GameMatch::query()
             ->where('play_session_id', $session->id)
             ->where('status', MatchStatus::Staged->value)
             ->orderBy('id')
-            ->first();
+            ->get();
 
-        if ($court === null || $match === null) {
-            return false;
+        // The oldest staged match that has a free court of its own. In strict modes a free court
+        // never takes another group's match, so an older match whose group is full is skipped.
+        foreach ($staged as $match) {
+            $court = $queries->lowestFreeCourtIn($strategy->allowedCourts($session, $match));
+            if ($court !== null) {
+                $this->doStart($session, $match, $court);
+
+                return true;
+            }
         }
 
-        $this->doStart($session, $match, $court);
-
-        return true;
+        return false;
     }
 
     private function doStart(PlaySession $session, GameMatch $match, int $court): void
@@ -543,88 +499,17 @@ class MatchService
         return array_values(array_map('intval', $match->matchPlayers()->pluck('player_id')->all()));
     }
 
+    private function queries(PlaySession $session): RotationQueries
+    {
+        return new RotationQueries($session);
+    }
+
     /**
-     * Players in a staged or playing match of the session.
-     *
      * @return list<int>
      */
     private function occupiedPlayerIds(PlaySession $session): array
     {
-        return array_values(array_map('intval', MatchPlayer::query()
-            ->whereIn('match_id', GameMatch::query()
-                ->select('id')
-                ->where('play_session_id', $session->id)
-                ->whereIn('status', [MatchStatus::Staged->value, MatchStatus::Playing->value]))
-            ->pluck('player_id')
-            ->all()));
-    }
-
-    /**
-     * Waiting players who are not in a staged or playing match.
-     *
-     * @param  list<int>  $exclude
-     * @return list<Candidate>
-     */
-    private function candidates(PlaySession $session, array $exclude = []): array
-    {
-        $skip = array_merge($this->occupiedPlayerIds($session), $exclude);
-
-        return array_values(SessionPlayer::query()
-            ->with('player')
-            ->where('play_session_id', $session->id)
-            ->where('status', SessionPlayerStatus::Waiting->value)
-            ->whereNotIn('player_id', $skip)
-            ->get()
-            ->map(fn (SessionPlayer $entry): Candidate => $this->candidate($entry))
-            ->all());
-    }
-
-    private function candidate(SessionPlayer $entry): Candidate
-    {
-        $queued = $entry->queued_at ?? $entry->checked_in_at;
-        $player = $entry->player ?? throw new \LogicException('Session player has no player.');
-
-        return new Candidate(
-            $entry->player_id,
-            $player->stars,
-            $entry->effectiveGames(),
-            $queued?->getTimestamp() ?? 0,
-        );
-    }
-
-    /**
-     * Partner and opponent counts over the session's non-void matches.
-     */
-    private function history(PlaySession $session, ?int $exceptMatchId = null): PairHistory
-    {
-        $matches = GameMatch::query()
-            ->with('matchPlayers')
-            ->where('play_session_id', $session->id)
-            ->where('status', '!=', MatchStatus::Void->value)
-            ->when($exceptMatchId !== null, fn ($q) => $q->whereKeyNot($exceptMatchId))
-            ->get()
-            ->map(fn (GameMatch $m): array => [
-                $m->matchPlayers->where('team', Team::A)->pluck('player_id')->map(fn ($id): int => (int) $id)->values()->all(),
-                $m->matchPlayers->where('team', Team::B)->pluck('player_id')->map(fn ($id): int => (int) $id)->values()->all(),
-            ]);
-
-        return PairHistory::fromMatches($matches);
-    }
-
-    private function engine(): RotationEngine
-    {
-        /** @var array<string, mixed> $config */
-        $config = (array) config('pickleq.rotation', []);
-
-        return new BalancedRotationEngine(Weights::fromConfig($config));
-    }
-
-    private function stagedCount(PlaySession $session): int
-    {
-        return GameMatch::query()
-            ->where('play_session_id', $session->id)
-            ->where('status', MatchStatus::Staged->value)
-            ->count();
+        return $this->queries($session)->occupiedPlayerIds();
     }
 
     /**
@@ -632,24 +517,7 @@ class MatchService
      */
     private function busyCourts(PlaySession $session): array
     {
-        return array_values(array_map('intval', GameMatch::query()
-            ->where('play_session_id', $session->id)
-            ->where('status', MatchStatus::Playing->value)
-            ->whereNotNull('court_no')
-            ->pluck('court_no')
-            ->all()));
-    }
-
-    private function lowestFreeCourt(PlaySession $session): ?int
-    {
-        $busy = $this->busyCourts($session);
-        for ($court = 1; $court <= $session->courts; $court++) {
-            if (! in_array($court, $busy, true)) {
-                return $court;
-            }
-        }
-
-        return null;
+        return $this->queries($session)->busyCourts();
     }
 
     /**

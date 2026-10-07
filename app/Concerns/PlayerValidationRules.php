@@ -2,6 +2,7 @@
 
 namespace App\Concerns;
 
+use App\Enums\Gender;
 use App\Enums\RatingSource;
 use App\Models\Club;
 use App\Models\Player;
@@ -41,6 +42,7 @@ trait PlayerValidationRules
                     ? $fail('That nickname is already taken in this club.')
                     : null,
             ],
+            'gender' => ['sometimes', 'nullable', Rule::enum(Gender::class)],
             'dupr_id' => [
                 'sometimes',
                 'nullable',

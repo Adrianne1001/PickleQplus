@@ -8,6 +8,7 @@ use App\Services\MatchService;
 use App\Services\PlaySessionService;
 use App\Services\SessionBoard;
 use Illuminate\Contracts\View\View;
+use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\On;
 use Livewire\Component;
@@ -25,8 +26,13 @@ class UpNext extends Component
 
     public string $upNextCount = '1';
 
-    /** Chosen court for Start; empty means the lowest free court. */
-    public string $courtChoice = '';
+    /**
+     * Chosen court for Start, keyed by staged match id (0 is the single picker of the
+     * other modes). Empty means the lowest free court.
+     *
+     * @var array<array-key, mixed>
+     */
+    public array $courtChoice = [];
 
     protected function bootBoard(): void
     {
@@ -67,11 +73,26 @@ class UpNext extends Component
     {
         $this->authorizeManage();
 
-        $court = ctype_digit($this->courtChoice) ? (int) $this->courtChoice : null;
+        $court = $this->chosenCourt($matchId);
         $matches->startMatch($this->session, $this->matchOrFail($matchId), $court);
 
-        $this->courtChoice = '';
+        $this->courtChoice = [];
         $this->changed();
+    }
+
+    /** The court picked for this match only; the shape of the whole property is validated first. */
+    private function chosenCourt(int $matchId): ?int
+    {
+        foreach ($this->courtChoice as $key => $value) {
+            if (! is_int($key) || ! (is_string($value) || is_int($value)) || ! ctype_digit((string) $value) && (string) $value !== '') {
+                throw ValidationException::withMessages(['court' => __('Pick a valid court.')]);
+            }
+        }
+
+        $key = app(SessionBoard::class)->mode($this->session) === 'skill_courts' ? $matchId : 0;
+        $value = (string) ($this->courtChoice[$key] ?? '');
+
+        return ctype_digit($value) ? (int) $value : null;
     }
 
     public function reroll(MatchService $matches, int $matchId): void
@@ -105,6 +126,8 @@ class UpNext extends Component
         return view('livewire.sessions.up-next', [
             'staged' => $board->staged($this->session),
             'freeCourts' => $board->freeCourts($this->session),
+            'mixed' => $board->mode($this->session) === 'mixed',
+            'groups' => $board->groups($this->session),
         ]);
     }
 

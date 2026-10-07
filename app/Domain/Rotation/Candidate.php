@@ -2,6 +2,8 @@
 
 namespace App\Domain\Rotation;
 
+use App\Enums\Gender;
+
 /**
  * A waiting player as seen by the rotation engine.
  */
@@ -12,5 +14,6 @@ final readonly class Candidate
         public int $stars,
         public int $effectiveGames,
         public int $queuedAt,
+        public ?Gender $gender = null,
     ) {}
 }

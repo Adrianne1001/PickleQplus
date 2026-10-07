@@ -64,6 +64,20 @@
                                     @error('nickname') <p class="text-red-600" data-test="error-nickname">{{ $message }}</p> @enderror
                                 </div>
                             @endif
+                            @if ($needsGender)
+                                <fieldset data-test="checkin-gender">
+                                    <legend class="block font-medium">{{ __('Gender (optional)') }}</legend>
+                                    <div class="mt-1 flex flex-wrap gap-2">
+                                        @foreach (['man' => __('Man'), 'woman' => __('Woman'), '' => __('Prefer not to say')] as $value => $label)
+                                            <label class="flex cursor-pointer items-center gap-2 rounded-lg border-2 border-zinc-300 px-4 py-3 text-lg has-checked:border-green-600 has-checked:bg-green-50 has-checked:text-zinc-900 has-focus-visible:outline-2 dark:border-zinc-600">
+                                                <input type="radio" wire:model="gender" value="{{ $value }}" class="size-5" />
+                                                {{ $label }}
+                                            </label>
+                                        @endforeach
+                                    </div>
+                                    @error('gender') <p class="text-red-600" data-test="error-gender">{{ $message }}</p> @enderror
+                                </fieldset>
+                            @endif
                             <div class="flex gap-3">
                                 <button type="button" wire:click="confirm" class="flex-1 rounded-lg bg-green-600 px-4 py-3 text-lg font-semibold text-white" data-test="checkin-confirm-button">{{ __('Yes, check me in') }}</button>
                                 <button type="button" wire:click="cancelSelect" class="rounded-lg border border-zinc-400 px-4 py-3 text-lg">{{ __('Cancel') }}</button>
@@ -118,6 +132,19 @@
                         <input id="regDuprId" type="text" wire:model="regDuprId" maxlength="6" autocomplete="off" class="mt-1 w-full rounded-lg border border-zinc-400 bg-white px-4 py-3 text-lg uppercase text-zinc-900" />
                         @error('dupr_id') <p class="text-red-600" data-test="error-dupr_id">{{ $message }}</p> @enderror
                     </div>
+
+                    <fieldset data-test="register-gender">
+                        <legend class="font-medium">{{ __('Gender (optional)') }}</legend>
+                        <div class="mt-1 flex flex-wrap gap-2">
+                            @foreach (['man' => __('Man'), 'woman' => __('Woman'), '' => __('Prefer not to say')] as $value => $label)
+                                <label class="flex cursor-pointer items-center gap-2 rounded-lg border-2 border-zinc-300 px-4 py-3 text-lg has-checked:border-green-600 has-checked:bg-green-50 has-checked:text-zinc-900 has-focus-visible:outline-2 dark:border-zinc-600">
+                                    <input type="radio" wire:model="regGender" value="{{ $value }}" class="size-5" />
+                                    {{ $label }}
+                                </label>
+                            @endforeach
+                        </div>
+                        @error('gender') <p class="text-red-600" data-test="error-gender">{{ $message }}</p> @enderror
+                    </fieldset>
 
                     <fieldset>
                         <legend class="font-medium">{{ __('How would you rate your level?') }}</legend>

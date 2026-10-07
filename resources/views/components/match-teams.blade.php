@@ -1,4 +1,4 @@
-@props(['match'])
+@props(['match', 'mixed' => false])
 
 {{-- Two teams of a board match row (see App\Services\SessionBoard). --}}
 <div class="grid gap-2 sm:grid-cols-2" {{ $attributes }}>
@@ -8,7 +8,12 @@
             <ul class="space-y-1">
                 @foreach ($match['teams'][$team] as $player)
                     <li class="flex items-center justify-between gap-2 text-base">
-                        <span class="truncate font-medium">{{ $player['name'] }}</span>
+                        <span class="flex min-w-0 items-center gap-2">
+                            <span class="truncate font-medium">{{ $player['name'] }}</span>
+                            @if ($mixed)
+                                <x-gender-marker :gender="$player['gender'] ?? null" />
+                            @endif
+                        </span>
                         <x-star-rating :stars="$player['stars']" />
                     </li>
                 @endforeach

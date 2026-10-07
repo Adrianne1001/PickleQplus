@@ -2,6 +2,7 @@
 
 namespace App\Livewire\Public;
 
+use App\Models\Player;
 use App\Models\PlaySession;
 use App\Services\SelfCheckInService;
 use Illuminate\Contracts\View\View;
@@ -17,7 +18,7 @@ use Livewire\Component;
  * The token is re-resolved on every request, so regenerating it or ending the
  * session closes the page at once. Throttles and rules live in SelfCheckInService.
  *
- * @phpstan-type SearchRow array{id: string, name: string, nickname: string|null, status: string|null}
+ * @phpstan-type SearchRow array{id: string, name: string, nickname: string|null, needs_gender: bool, status: string|null}
  */
 #[Layout('layouts::public')]
 #[Title('Check in')]
@@ -39,6 +40,13 @@ class CheckIn extends Component
     /** Optional nickname offered at check-in when the player has none. */
     public string $nickname = '';
 
+    /** Optional gender offered at check-in when the player has none. */
+    public string $gender = '';
+
+    /** True when the tapped player has no gender yet. Only this flag is exposed, never the value. */
+    #[Locked]
+    public bool $needsGender = false;
+
     public bool $registering = false;
 
     public string $regName = '';
@@ -48,6 +56,8 @@ class CheckIn extends Component
     public string $regDuprId = '';
 
     public string $regStars = '';
+
+    public string $regGender = '';
 
     /** @var array{result: string, player_id: string, public_name: string}|null */
     #[Locked]
@@ -68,6 +78,8 @@ class CheckIn extends Component
     {
         $this->selectedId = null;
         $this->nickname = '';
+        $this->gender = '';
+        $this->needsGender = false;
         $this->results = [];
 
         $session = $this->session();
@@ -83,7 +95,10 @@ class CheckIn extends Component
     {
         $this->resetErrorBag();
         $this->nickname = '';
+        $this->gender = '';
         $this->selectedId = collect($this->results)->contains('id', $playerId) ? $playerId : null;
+        $row = collect($this->results)->firstWhere('id', $this->selectedId);
+        $this->needsGender = $this->selectedId !== null && (bool) ($row['needs_gender'] ?? false);
 
         if ($this->selectedId === null) {
             $this->addError('player', __('Could not find that player. Search for your name again.'));
@@ -94,6 +109,8 @@ class CheckIn extends Component
     {
         $this->selectedId = null;
         $this->nickname = '';
+        $this->gender = '';
+        $this->needsGender = false;
         $this->resetErrorBag();
     }
 
@@ -107,7 +124,7 @@ class CheckIn extends Component
         }
 
         try {
-            $this->finish($checkIns->checkIn($session, $this->token, $this->selectedId, $this->nickname === '' ? null : $this->nickname, (string) request()->ip()), $session);
+            $this->finish($checkIns->checkIn($session, $this->token, $this->selectedId, $this->nickname === '' ? null : $this->nickname, (string) request()->ip(), $this->needsGender && $this->gender !== '' ? $this->gender : null), $session);
         } catch (ValidationException $e) {
             $this->setErrorBag($e->validator->errors());
         }
@@ -145,6 +162,7 @@ class CheckIn extends Component
                 $this->regDuprId === '' ? null : $this->regDuprId,
                 $this->regStars,
                 (string) request()->ip(),
+                $this->regGender === '' ? null : $this->regGender,
             ), $session);
         } catch (ValidationException $e) {
             $this->setErrorBag($e->validator->errors());

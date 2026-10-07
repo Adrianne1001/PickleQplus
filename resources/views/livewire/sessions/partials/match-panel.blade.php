@@ -16,9 +16,12 @@
             <flux:select wire:model="inPlayerId" :label="__('Swap in (waiting)')" data-test="in-player">
                 <flux:select.option value="">{{ __('Choose a waiting player') }}</flux:select.option>
                 @foreach ($candidates as $candidate)
-                    <flux:select.option value="{{ $candidate['id'] }}">{{ $candidate['name'] }}</flux:select.option>
+                    <flux:select.option value="{{ $candidate['id'] }}">{{ $candidate['name'] }}@if ($mixed ?? false) ({{ match ($candidate['gender'] ?? null) { 'man' => 'M', 'woman' => 'W', default => '?' } }})@endif</flux:select.option>
                 @endforeach
             </flux:select>
+            @if ($mixed ?? false)
+                <flux:text class="text-sm" data-test="swap-gender-hint">{{ __('Mixed doubles: swap in a player of the same gender as the player leaving.') }}</flux:text>
+            @endif
             <flux:button variant="primary" class="w-full" wire:click="swap" data-test="confirm-swap">{{ __('Swap') }}</flux:button>
         @elseif ($panel === 'remove')
             <flux:select wire:model="removeStatus" :label="__('Removed player becomes')" data-test="remove-status">

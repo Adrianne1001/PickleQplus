@@ -98,7 +98,7 @@ class Queue extends Component
             'status' => $data['status'],
             'up_next' => $upNext,
             'courts' => $courts,
-            'waiting' => array_map(fn (array $w): array => ['id' => $w['id'], 'position' => $w['position'], 'estimate' => $w['estimate_minutes']], $data['waiting']),
+            'waiting' => array_map(fn (array $w): array => ['id' => $w['id'], 'position' => $w['group_position'] ?? $w['position'], 'estimate' => $w['estimate_minutes']], $data['waiting']),
             'on_break' => array_column($data['on_break'], 'id'),
             'players' => array_column($data['players'], 'id'),
         ];

@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\RotationMode;
 use App\Enums\SessionStatus;
 use Database\Factories\PlaySessionFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -24,6 +25,8 @@ use Illuminate\Support\Str;
  * @property int $courts
  * @property array{type: string, games: int, to: int, win_by: int} $scoring
  * @property SessionStatus $status
+ * @property RotationMode $rotation_mode
+ * @property array{winners_stay_max_wins: int, skill_groups: list<array<string, int>>} $mode_settings
  * @property string|null $checkin_token
  * @property int $up_next_count
  * @property bool $auto_fill
@@ -32,11 +35,14 @@ use Illuminate\Support\Str;
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  */
-#[Fillable(['name', 'date', 'courts', 'scoring', 'up_next_count', 'auto_fill'])]
+#[Fillable(['name', 'date', 'courts', 'scoring', 'up_next_count', 'auto_fill', 'rotation_mode', 'mode_settings'])]
 class PlaySession extends Model
 {
     /** @use HasFactory<PlaySessionFactory> */
     use HasFactory;
+
+    /** @var array<string, mixed> */
+    protected $attributes = ['rotation_mode' => 'balanced'];
 
     protected static function booted(): void
     {
@@ -126,6 +132,7 @@ class PlaySession extends Model
             'date' => 'date',
             'courts' => 'integer',
             'status' => SessionStatus::class,
+            'rotation_mode' => RotationMode::class,
             'up_next_count' => 'integer',
             'auto_fill' => 'boolean',
             'started_at' => 'datetime',
@@ -156,6 +163,31 @@ class PlaySession extends Model
                 return $ordered + $decoded;
             },
             set: fn (array $value): string => (string) json_encode($value),
+        );
+    }
+
+    /**
+     * Mode settings in a fixed key order (winners_stay_max_wins, skill_groups)
+     * with defaults filled in, because MySQL's JSON type re-orders object keys.
+     * Null in the database means all defaults.
+     *
+     * @return Attribute<array<string, mixed>, array<string, mixed>|null>
+     */
+    protected function modeSettings(): Attribute
+    {
+        return Attribute::make(
+            get: function (?string $value): array {
+                /** @var array<string, mixed> $decoded */
+                $decoded = $value === null ? [] : (array) json_decode($value, true);
+                $ordered = [
+                    'winners_stay_max_wins' => (int) ($decoded['winners_stay_max_wins'] ?? config('pickleq.rotation.winners_stay_max_wins', 2)),
+                    'skill_groups' => array_values((array) ($decoded['skill_groups'] ?? [])),
+                ];
+                unset($decoded['winners_stay_max_wins'], $decoded['skill_groups']);
+
+                return $ordered + $decoded;
+            },
+            set: fn (?array $value): ?string => $value === null ? null : (string) json_encode($value),
         );
     }
 

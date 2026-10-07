@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Domain\Stars\StarRating;
+use App\Enums\Gender;
 use App\Enums\RatingSource;
 use App\Models\Club;
 use App\Models\Player;
@@ -10,6 +11,7 @@ use App\Rules\DuprPlayerId;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
+use Throwable;
 
 /**
  * Player writes. Input is expected to be validated already (see
@@ -19,7 +21,7 @@ use Illuminate\Validation\ValidationException;
 class PlayerService
 {
     /**
-     * @param  array{name: string, nickname?: string|null, dupr_id?: string|null, dupr_rating?: float|int|string|null, rating_source?: RatingSource|string|null, stars?: int|null}  $data
+     * @param  array{name: string, nickname?: string|null, gender?: Gender|string|null, dupr_id?: string|null, dupr_rating?: float|int|string|null, rating_source?: RatingSource|string|null, stars?: int|null}  $data
      */
     public function create(Club $club, array $data): Player
     {
@@ -32,11 +34,27 @@ class PlayerService
     /**
      * Partial update: only keys present in $data change.
      *
-     * @param  array{name?: string, nickname?: string|null, dupr_id?: string|null, dupr_rating?: float|int|string|null, rating_source?: RatingSource|string|null, stars?: int|null}  $data
+     * @param  array{name?: string, nickname?: string|null, gender?: Gender|string|null, dupr_id?: string|null, dupr_rating?: float|int|string|null, rating_source?: RatingSource|string|null, stars?: int|null}  $data
      */
     public function update(Player $player, array $data): Player
     {
-        return $this->persist($player, $player->club ?? $player->club()->firstOrFail(), $data);
+        $before = $player->gender;
+        $updated = $this->persist($player, $player->club ?? $player->club()->firstOrFail(), $data);
+
+        if ($updated->gender !== $before) {
+            // After any surrounding transaction commits (the roster import wraps this), so the session lock
+            // is never taken while player rows are locked: the usual order is session, then player.
+            DB::afterCommit(static function () use ($updated): void {
+                // A failure here must not reach the caller (a roster import) or skip the other players.
+                try {
+                    app(CheckInService::class)->gendersChanged($updated);
+                } catch (Throwable $e) {
+                    report($e);
+                }
+            });
+        }
+
+        return $updated;
     }
 
     public function deactivate(Player $player): Player
@@ -142,9 +160,20 @@ class PlayerService
             }
         }
 
+        // A key that is present sets the gender (null or blank clears it); an absent key keeps it.
+        $gender = $player->gender;
+        if (array_key_exists('gender', $data)) {
+            $raw = $data['gender'];
+            $gender = Gender::tryParse($raw);
+            if ($gender === null && $raw !== null && (! is_string($raw) || trim($raw) !== '')) {
+                throw ValidationException::withMessages(['gender' => 'Gender must be man or woman.']);
+            }
+        }
+
         $player->forceFill([
             'name' => $name,
             'nickname' => $nickname,
+            'gender' => $gender,
             'dupr_id' => $duprId,
             'dupr_rating' => $rating,
             'rating_source' => $source,
