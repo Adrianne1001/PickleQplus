@@ -186,7 +186,7 @@ test('waiting positions count within each group', function () {
     $html = Livewire::actingAs($owner)->test(WaitingList::class, ['session' => $session])->html();
 
     // 2 waiting in the top group and 2 in the bottom group: both lists start at 1 and end at 2.
-    preg_match_all('/tabular-nums text-zinc-500">(\d+)</', $html, $m);
+    preg_match_all('/data-test="waiting-position"[^>]*>(\d+)</', $html, $m);
     expect($m[1])->toBe(['1', '2', '1', '2']);
 });
 
@@ -249,11 +249,11 @@ test('tv and queue waiting positions count within each group', function () {
     uiSkillJoin($session, [5, 5, 5, 5, 5, 6, 2, 2, 2, 2, 2, 1]);
 
     $html = Livewire::test(Queue::class, ['club' => $session->club, 'publicId' => $session->public_id])->html();
-    preg_match_all('/tabular-nums text-zinc-500">(\d+)\./', $html, $m);
+    preg_match_all('/data-test="waiting-position"[^>]*>(\d+)</', $html, $m);
     expect($m[1])->toBe(['1', '2', '1', '2']);
 
     $tv = Livewire::test(Tv::class, ['club' => $session->club, 'tvId' => $session->tv_id])->html();
-    preg_match_all('/tabular-nums text-zinc-400">(\d+)\./', $tv, $m);
+    preg_match_all('/data-test="waiting-position"[^>]*>(\d+)</', $tv, $m);
     expect($m[1])->toBe(['1', '2', '1', '2']);
 });
 
@@ -342,7 +342,7 @@ test('the public snapshot carries group_position and the queue renders it', func
     expect(collect($waiting)->pluck('group_position')->all())->toBe([1, 2, 1])
         ->and(collect($waiting)->pluck('position')->all())->not->toBe([1, 2, 1]);
 
-    preg_match_all('/tabular-nums text-zinc-500">(\d+)\./', $component->html(), $m);
+    preg_match_all('/data-test="waiting-position"[^>]*>(\d+)</', $component->html(), $m);
     expect($m[1])->toBe(['1', '2', '1']);
 });
 

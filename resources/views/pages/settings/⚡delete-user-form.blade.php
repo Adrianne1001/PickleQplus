@@ -4,9 +4,9 @@ use Livewire\Component;
 
 new class extends Component {}; ?>
 
-<section class="mt-10 space-y-6">
-    <div class="relative mb-5">
-        <flux:heading>{{ __('Delete account') }}</flux:heading>
+<section class="mt-8 space-y-4 rounded-2xl border border-red-300 bg-red-50/50 p-5 dark:border-red-900 dark:bg-red-950/20">
+    <div class="relative">
+        <flux:heading class="text-red-700 dark:text-red-400">{{ __('Delete account') }}</flux:heading>
         <flux:subheading>{{ __('Delete your account and all of its resources') }}</flux:subheading>
     </div>
 

@@ -8,7 +8,7 @@
         <x-auth-header :title="__('Join :club', ['club' => $club->name])" :description="$description" />
 
         <div class="flex justify-center">
-            <flux:badge size="lg" color="blue" icon="user-group">{{ $club->name }} · {{ ucfirst(($existingRole ?? $invitation->role)->value) }}</flux:badge>
+            <flux:badge size="lg" color="green" icon="user-group">{{ $club->name }} · {{ ucfirst(($existingRole ?? $invitation->role)->value) }}</flux:badge>
         </div>
 
         @error('invitation')

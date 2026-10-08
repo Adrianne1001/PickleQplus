@@ -10,15 +10,20 @@
         <link rel="icon" href="/favicon.svg" type="image/svg+xml">
         @fonts
         @vite(['resources/css/app.css', 'resources/js/app.js'])
+        {{-- The forced-dark TV page skips the theme script; every other public page follows the shared choice (light by default). --}}
         @unless ($dark)
-            <script>
-                if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-                    document.documentElement.classList.add('dark');
-                }
-            </script>
+            @include('partials.appearance')
+        @else
+            <style>:root.dark { color-scheme: dark; }</style>
         @endunless
     </head>
-    <body class="min-h-screen bg-white text-zinc-900 antialiased dark:bg-zinc-950 dark:text-zinc-100">
+    <body class="min-h-screen bg-zinc-50 text-zinc-900 antialiased dark:bg-zinc-950 dark:text-zinc-100">
         {{ $slot }}
+
+        @unless ($dark)
+            <div class="pointer-events-none fixed bottom-4 end-4 z-40 print:hidden">
+                <x-theme-toggle class="pointer-events-auto border border-zinc-200 bg-white shadow-md dark:border-zinc-700 dark:bg-zinc-900" />
+            </div>
+        @endunless
     </body>
 </html>

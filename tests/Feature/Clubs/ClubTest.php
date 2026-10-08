@@ -3,6 +3,7 @@
 use App\Enums\ClubRole;
 use App\Models\Club;
 use App\Models\Player;
+use App\Models\PlaySession;
 use App\Models\User;
 use App\Services\ClubService;
 use Illuminate\Validation\ValidationException;
@@ -351,4 +352,89 @@ test('a flash message is shown in the app layout', function () {
         ->assertSee('You joined Test Club.')
         ->assertSeeHtml('data-test="flash-status"');
 
+});
+
+test('a live session shows the live now card with a link to the board', function () {
+    $owner = User::factory()->create();
+    $club = Club::factory()->withOwner($owner)->create();
+    $session = PlaySession::factory()->for($club)->live()->create(['name' => 'Friday Open']);
+
+    Livewire::actingAs($owner)->test('pages::clubs.show', ['club' => $club])
+        ->assertSeeHtml('data-test="live-session-card"')
+        ->assertSee('Live now')
+        ->assertSee('Friday Open')
+        ->assertSee(route('clubs.sessions.show', [$club, $session]), false);
+});
+
+test('a club without sessions shows the empty state', function () {
+    $owner = User::factory()->create();
+    $club = Club::factory()->withOwner($owner)->create();
+
+    Livewire::actingAs($owner)->test('pages::clubs.show', ['club' => $club])
+        ->assertDontSeeHtml('data-test="live-session-card"')
+        ->assertSeeHtml('data-test="no-sessions"')
+        ->assertSee(route('clubs.sessions.create', $club), false);
+});
+
+test('without a live session the last session is shown with a new session link', function () {
+    $owner = User::factory()->create();
+    $club = Club::factory()->withOwner($owner)->create();
+    PlaySession::factory()->for($club)->ended()->create(['name' => 'Last Tuesday']);
+
+    Livewire::actingAs($owner)->test('pages::clubs.show', ['club' => $club])
+        ->assertDontSeeHtml('data-test="live-session-card"')
+        ->assertSeeHtml('data-test="last-session"')
+        ->assertSee('Last Tuesday')
+        ->assertSee(route('clubs.sessions.create', $club), false);
+});
+
+test("another club's live session never appears on the overview", function () {
+    $owner = User::factory()->create();
+    $club = Club::factory()->withOwner($owner)->create();
+    $other = Club::factory()->withOwner()->create();
+    PlaySession::factory()->for($other)->live()->create(['name' => 'Secret Rival Night']);
+
+    Livewire::actingAs($owner)->test('pages::clubs.show', ['club' => $club])
+        ->assertDontSee('Secret Rival Night')
+        ->assertDontSeeHtml('data-test="live-session-card"')
+        ->assertSeeHtml('data-test="no-sessions"');
+});
+
+test('every live session gets its own card and board link', function () {
+    $owner = User::factory()->create();
+    $club = Club::factory()->withOwner($owner)->create();
+    $a = PlaySession::factory()->for($club)->live()->create(['name' => 'Court Group A']);
+    $b = PlaySession::factory()->for($club)->live()->create(['name' => 'Court Group B']);
+
+    Livewire::actingAs($owner)->test('pages::clubs.show', ['club' => $club])
+        ->assertSee('Court Group A')
+        ->assertSee('Court Group B')
+        ->assertSee(route('clubs.sessions.show', [$club, $a]), false)
+        ->assertSee(route('clubs.sessions.show', [$club, $b]), false)
+        ->assertSee(route('clubs.sessions.index', $club), false);
+});
+
+test('an older live session still wins over a newer ended one', function () {
+    $owner = User::factory()->create();
+    $club = Club::factory()->withOwner($owner)->create();
+    PlaySession::factory()->for($club)->live()->create(['name' => 'Still Going', 'date' => now()->subDay()]);
+    PlaySession::factory()->for($club)->ended()->create(['name' => 'Newer Finished', 'date' => now()]);
+
+    Livewire::actingAs($owner)->test('pages::clubs.show', ['club' => $club])
+        ->assertSeeHtml('data-test="live-session-card"')
+        ->assertSee('Still Going')
+        ->assertDontSee('Newer Finished')
+        ->assertSeeHtml('data-test="stat-sessions"')
+        ->assertSeeInOrder(['Sessions', '2']);
+});
+
+test('a draft is never shown as the last session', function () {
+    $owner = User::factory()->create();
+    $club = Club::factory()->withOwner($owner)->create();
+    PlaySession::factory()->for($club)->create(['name' => 'Next Week Draft', 'date' => now()->addWeek()]);
+
+    Livewire::actingAs($owner)->test('pages::clubs.show', ['club' => $club])
+        ->assertDontSeeHtml('data-test="last-session"')
+        ->assertDontSee('Next Week Draft')
+        ->assertSeeHtml('data-test="no-sessions"');
 });

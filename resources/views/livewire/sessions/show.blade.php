@@ -1,42 +1,43 @@
-<section class="w-full max-w-5xl space-y-8" wire:poll.30s.visible="syncFromBroadcast">
-    <div class="flex flex-wrap items-start justify-between gap-4">
-        <div>
-            <flux:heading size="xl" level="1" class="flex flex-wrap items-center gap-3">
-                {{ $session->name }}
-                <x-session-status-badge :status="$session->status" />
-            </flux:heading>
-            <flux:subheading>
-                {{ $session->date->format('D, j M Y') }}
-                &middot; {{ trans_choice(':count court|:count courts', $session->courts) }}
-                &middot; {{ __('to :to, win by :by', ['to' => $session->scoring['to'], 'by' => $session->scoring['win_by']]) }}
-            </flux:subheading>
-        </div>
+<section class="w-full max-w-7xl space-y-6 lg:space-y-8" wire:poll.30s.visible="syncFromBroadcast">
+    <x-page-header
+        :eyebrow="$club->name"
+        :title="$session->name"
+        :description="$session->date->format('D, j M Y').' · '.trans_choice(':count court|:count courts', $session->courts).' · '.__('to :to, win by :by', ['to' => $session->scoring['to'], 'by' => $session->scoring['win_by']])"
+        :back="route('clubs.sessions.index', $club)"
+        :back-label="__('All sessions')"
+    >
+        <div class="mt-3"><x-session-status-badge :status="$session->status" /></div>
 
-        <div class="flex flex-wrap gap-2" data-test="session-actions">
-            @if ($session->isDraft())
-                <flux:button variant="primary" icon="play" wire:click="start" data-test="start-session-button">{{ __('Start session') }}</flux:button>
-            @endif
-            @if ($session->isLive())
-                <flux:modal.trigger name="end-session">
-                    <flux:button variant="primary" icon="stop" data-test="end-session-button">{{ __('End session') }}</flux:button>
-                </flux:modal.trigger>
-            @endif
-            @unless ($session->isDraft())
-                <flux:button icon="chart-bar" :href="route('clubs.sessions.results', [$club, $session])" wire:navigate data-test="results-link">{{ __('Results') }}</flux:button>
-            @endunless
-            @if ($session->isEnded())
-                <flux:button icon="arrow-down-tray" :href="route('clubs.sessions.dupr', [$club, $session])" wire:navigate data-test="dupr-export-link">{{ __('DUPR export') }}</flux:button>
-            @endif
-            @unless ($session->isEnded())
-                <flux:button icon="pencil-square" :href="route('clubs.sessions.edit', [$club, $session])" wire:navigate data-test="edit-session-button">{{ __('Edit') }}</flux:button>
-            @endunless
-            @if ($session->isDraft())
-                <flux:modal.trigger name="delete-session">
-                    <flux:button variant="danger" icon="trash" data-test="delete-session-button">{{ __('Delete') }}</flux:button>
-                </flux:modal.trigger>
-            @endif
-        </div>
-    </div>
+        <x-slot:actions>
+            <div class="flex flex-wrap items-center gap-2" data-test="session-actions">
+                @if ($session->isDraft())
+                    <flux:button variant="primary" icon="play" class="min-h-11" wire:click="start" data-test="start-session-button">{{ __('Start session') }}</flux:button>
+                @endif
+                @if ($session->isLive())
+                    <flux:button icon="qr-code" class="min-h-11" x-on:click="$dispatch('open-share'); $nextTick(() => document.getElementById('share')?.scrollIntoView({ behavior: 'smooth' }))" data-test="share-links-button">{{ __('QR and links') }}</flux:button>
+                @endif
+                @unless ($session->isDraft())
+                    <flux:button icon="chart-bar" class="min-h-11" :href="route('clubs.sessions.results', [$club, $session])" wire:navigate data-test="results-link">{{ __('Results') }}</flux:button>
+                @endunless
+                @if ($session->isEnded())
+                    <flux:button icon="arrow-down-tray" class="min-h-11" :href="route('clubs.sessions.dupr', [$club, $session])" wire:navigate data-test="dupr-export-link">{{ __('DUPR export') }}</flux:button>
+                @endif
+                @unless ($session->isEnded())
+                    <flux:button icon="pencil-square" class="min-h-11" :href="route('clubs.sessions.edit', [$club, $session])" wire:navigate data-test="edit-session-button">{{ __('Edit') }}</flux:button>
+                @endunless
+                @if ($session->isLive())
+                    <flux:modal.trigger name="end-session">
+                        <flux:button variant="danger" icon="stop" class="min-h-11" data-test="end-session-button">{{ __('End session') }}</flux:button>
+                    </flux:modal.trigger>
+                @endif
+                @if ($session->isDraft())
+                    <flux:modal.trigger name="delete-session">
+                        <flux:button variant="danger" icon="trash" class="min-h-11" data-test="delete-session-button">{{ __('Delete') }}</flux:button>
+                    </flux:modal.trigger>
+                @endif
+            </div>
+        </x-slot:actions>
+    </x-page-header>
 
     @error('status')
         <flux:callout variant="danger" icon="exclamation-circle" data-test="session-error">
@@ -44,19 +45,33 @@
         </flux:callout>
     @enderror
 
+    @if ($session->isDraft())
+        <x-card>
+            <x-empty-state icon="play-circle" :title="__('This session has not started')" :description="__('Check players in below, then start the session to open the courts and the queue.')" />
+        </x-card>
+    @endif
+
     @if ($session->isLive())
-        <livewire:sessions.courts :session="$session" :key="'courts-'.$session->id" />
-        <livewire:sessions.up-next :session="$session" :key="'up-next-'.$session->id" />
-        <livewire:sessions.waiting-list :session="$session" :key="'waiting-'.$session->id" />
+        <div class="grid items-start gap-6 xl:grid-cols-3 xl:gap-8">
+            <div class="space-y-6 lg:space-y-8 xl:col-span-2">
+                <livewire:sessions.courts :session="$session" :key="'courts-'.$session->id" />
+                <livewire:sessions.up-next :session="$session" :key="'up-next-'.$session->id" />
+            </div>
+            <div class="xl:sticky xl:top-4">
+                <livewire:sessions.waiting-list :session="$session" :key="'waiting-'.$session->id" />
+            </div>
+        </div>
     @endif
 
     @unless ($session->isDraft())
         <livewire:sessions.results :session="$session" :key="'results-'.$session->id" />
     @endunless
 
-    <livewire:sessions.check-in-panel :session="$session" :key="'check-in-'.$session->id" />
+    <div class="space-y-6 lg:space-y-8">
+        <livewire:sessions.check-in-panel :session="$session" :key="'check-in-'.$session->id" />
 
-    <livewire:sessions.check-in-qr :session="$session" :key="'check-in-qr-'.$session->id" />
+        <livewire:sessions.check-in-qr :session="$session" :key="'check-in-qr-'.$session->id" />
+    </div>
 
     <flux:modal name="end-session" class="max-w-lg">
         <div class="space-y-6">

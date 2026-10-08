@@ -5,7 +5,7 @@
     <div class="flex gap-2">
         <input id="copy-{{ $test }}" type="text" readonly value="{{ $value }}" data-test="{{ $test }}"
             x-ref="field" x-on:focus="$el.select()"
-            class="min-w-0 flex-1 rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100" />
+            class="min-w-0 flex-1 rounded-lg border border-zinc-300 bg-zinc-50 px-3 py-2 text-sm text-zinc-900 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-brand-600 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100" />
         <flux:button type="button" icon="clipboard"
             x-on:click="navigator.clipboard.writeText($refs.field.value).then(() => { copied = true; setTimeout(() => copied = false, 2000) })">
             <span x-show="!copied">{{ __('Copy') }}</span>

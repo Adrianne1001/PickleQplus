@@ -89,8 +89,8 @@
                 </div>
 
                 <div class="mt-5 space-x-0.5 text-sm leading-5 text-center">
-                    <span class="opacity-50">{{ __('or you can') }}</span>
-                    <div class="inline font-medium underline cursor-pointer opacity-80">
+                    <span class="text-zinc-600 dark:text-zinc-400">{{ __('or you can') }}</span>
+                    <div class="inline cursor-pointer font-medium text-brand-700 underline dark:text-brand-400">
                         <span x-show="!showRecoveryInput" @click="toggleInput()">{{ __('login using a recovery code') }}</span>
                         <span x-show="showRecoveryInput" @click="toggleInput()">{{ __('login using an authentication code') }}</span>
                     </div>

@@ -184,6 +184,14 @@ Phase 7 additions (P7.4, see `docs/design/p7.4-rotation-modes.md`): `players.gen
   - A King of the Court pool with more than 4 players stages the 4 earliest arrivals, and the rest go to the queue.
   - With fewer than 2 challengers, the winners-stay winners wait and the court sits idle.
 
+**Phase 8 rules: UI/UX refresh (decided 2026-10-08; change here first if needed):**
+- **Goal (user request):** a modern, clean, easy-to-navigate UI across the app, plus a real marketing landing page at `/`. This is visual and UX work only. No domain logic, routes, permissions or data changes, except a route or view needed for the landing page.
+- **Theme (user decision):** **light mode by default** for everyone, including first visits, regardless of the OS preference. Dark mode stays available through a sun/moon toggle that is visible on the landing page, auth pages, the app shell and the public queue, check-in and leaderboard pages. The choice is stored in the browser via Flux's appearance store, so it carries across pages. Settings → Appearance keeps Light / Dark / System, with Light as the default.
+- **TV display stays dark** whatever the theme setting, because it's a venue screen read from about 10 m (P3.2). It gets the same brand styling.
+- **Brand (orchestrator default, change if the user wants):** a fresh pickleball-green accent on a neutral base, with rounded cards, soft borders and shadows, and clear type hierarchy. Fonts are loaded the way the kit already does it, with no new npm or composer packages. Illustrations are inline SVG or CSS, so there are no external image assets.
+- **Navigation:** every staff page has a clear page header (title, short description, primary action). The sidebar groups club pages, shows the active page and keeps the club switcher. Lists have helpful empty states that point to the next step. Every page works on a phone.
+- **Tests:** existing `data-test` hooks and the strings tests assert on are kept, unless a test is updated on purpose along with the copy. The design system is written down in `docs/design/ui-style.md` so later pages stay consistent.
+
 ---
 
 ## 3. Balanced rotation engine
@@ -389,6 +397,14 @@ Legend: `[ ]` todo · `[x]` done. Each item has an ID (e.g. `P2.3`) — referenc
   - [ ] **P7.4d** Court-bound staging + winners stay: pending pools, `MatchCompleter`, streaks, void/undo/break rules, max-wins setting. Done when winners stay until max wins and pools stay consistent after void, undo and break.
   - [ ] **P7.4e** King/Queen of the Court: `LadderPlanner`, routing, ladder shrink, first fill by stars, crown/pools UI. Done when an 8-court simulation runs with no deadlock through breaks and court changes.
   - [ ] **P7.4f** Cross-mode adversarial tests on MySQL, plus a manual board check.
+
+### Phase 8 — UI/UX refresh *(branch `feature/p8-ui-refresh`; see Phase 8 rules)*
+- [x] **P8.1** Design foundation: brand tokens in `app.css`, light-by-default theme with a dark toggle, refreshed app shell (sidebar, header, mobile nav), auth and public layouts, shared UI components, `docs/design/ui-style.md`
+- [x] **P8.2** Landing page at `/`: hero, features, how it works, rotation modes, FAQ, call to action. Guests get sign up / log in, signed-in users get "Go to dashboard".
+- [x] **P8.3** Staff pages polish: dashboard, clubs (create, show, settings, members), players and profile, sessions (list, form, board, results, DUPR export), stats, account settings
+- [x] **P8.4** Public and guest pages polish: public queue, self check-in, public leaderboard, check-in closed, invitations, auth pages, TV display (stays dark)
+- [x] **P8.6** Club overview orientation: show the club's live session (with a "Open board" link) or the last session, plus session and player counts. *(Added after P8.3: the overview page had no data for a live session.)*
+- [ ] **P8.5** Manual browser check: light and dark on desktop and phone, the theme toggle persisting across pages, the landing page, and the board in use
 
 ---
 

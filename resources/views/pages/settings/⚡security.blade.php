@@ -172,7 +172,7 @@ new #[Title('Security settings')] class extends Component {
     <flux:heading level="2" class="sr-only">{{ __('Security settings') }}</flux:heading>
 
     <x-pages::settings.layout :heading="__('Update password')" :subheading="__('Ensure your account is using a long, random password to stay secure')">
-        <form method="POST" wire:submit="updatePassword" class="mt-6 space-y-6">
+        <form method="POST" wire:submit="updatePassword" class="space-y-6">
             <flux:input
                 wire:model="current_password"
                 :label="__('Current password')"
@@ -208,7 +208,7 @@ new #[Title('Security settings')] class extends Component {
         </form>
 
         @if ($canManageTwoFactor)
-            <section class="mt-12">
+            <section class="mt-8 border-t border-zinc-200 pt-8 dark:border-zinc-700">
                 <flux:heading>{{ __('Two-factor authentication') }}</flux:heading>
                 <flux:subheading>{{ __('Manage your two-factor authentication settings') }}</flux:subheading>
 
@@ -253,7 +253,7 @@ new #[Title('Security settings')] class extends Component {
         @endif
 
         @if ($canManagePasskeys)
-            <section class="mt-12">
+            <section class="mt-8 border-t border-zinc-200 pt-8 dark:border-zinc-700">
                 <flux:heading>{{ __('Passkeys') }}</flux:heading>
                 <flux:subheading>{{ __('Manage your passkeys for passwordless sign-in') }}</flux:subheading>
 
@@ -272,7 +272,7 @@ new #[Title('Security settings')] class extends Component {
                                                 <flux:badge size="sm">{{ $passkey['authenticator'] }}</flux:badge>
                                             @endif
                                         </div>
-                                        <p class="text-zinc-500 dark:text-zinc-400 text-xs">
+                                        <p class="text-zinc-600 dark:text-zinc-400 text-xs">
                                             {{ __('Added :time', ['time' => $passkey['created_at_diff']]) }}
                                             @if ($passkey['last_used_at_diff'])
                                                 <span class="opacity-50 mx-1">/</span>

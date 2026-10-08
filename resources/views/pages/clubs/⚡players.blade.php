@@ -383,99 +383,103 @@ new #[Title('Players')] class extends Component {
 }; ?>
 
 <section class="w-full space-y-6">
-    <div class="flex flex-wrap items-start justify-between gap-4">
-        <div>
-            <flux:heading size="xl" level="1">{{ __('Players') }}</flux:heading>
-            <flux:subheading>{{ __('Your club roster. Players are deactivated, never deleted, so match history is kept.') }}</flux:subheading>
-        </div>
-
-        <div class="flex flex-wrap gap-2">
-            <flux:button icon="arrow-up-tray" wire:click="startImport" data-test="import-csv-button">
+    <x-page-header :eyebrow="$club->name" :title="__('Players')" :description="__('Your club roster. Players are deactivated, never deleted, so match history is kept.')">
+        <x-slot:actions>
+            <flux:button icon="arrow-up-tray" class="min-h-11" wire:click="startImport" data-test="import-csv-button">
                 {{ __('Import CSV') }}
             </flux:button>
 
-            <flux:button variant="primary" icon="plus" wire:click="startAdd" data-test="add-player-button">
+            <flux:button variant="primary" icon="plus" class="min-h-11" wire:click="startAdd" data-test="add-player-button">
                 {{ __('Add player') }}
             </flux:button>
-        </div>
-    </div>
+        </x-slot:actions>
+    </x-page-header>
 
-    <div class="flex flex-col gap-3 sm:flex-row">
-        <div class="flex-1">
-            <flux:input
-                wire:model.live.debounce.300ms="search"
-                icon="magnifying-glass"
-                type="search"
-                :placeholder="__('Search by name or DUPR ID')"
-                :aria-label="__('Search players')"
-                clearable
-            />
+    <x-card :padding="false">
+        <div class="flex flex-col gap-3 border-b border-zinc-100 p-4 sm:flex-row dark:border-zinc-800">
+            <div class="flex-1">
+                <flux:input
+                    wire:model.live.debounce.300ms="search"
+                    icon="magnifying-glass"
+                    type="search"
+                    :placeholder="__('Search by name or DUPR ID')"
+                    :aria-label="__('Search players')"
+                    clearable
+                />
+            </div>
+            <flux:select wire:model.live="status" class="sm:!w-44" :aria-label="__('Filter players')">
+                <option value="active">{{ __('Active') }}</option>
+                <option value="inactive">{{ __('Inactive') }}</option>
+                <option value="all">{{ __('All players') }}</option>
+            </flux:select>
         </div>
-        <flux:select wire:model.live="status" class="sm:!w-44" :aria-label="__('Filter players')">
-            <option value="active">{{ __('Active') }}</option>
-            <option value="inactive">{{ __('Inactive') }}</option>
-            <option value="all">{{ __('All players') }}</option>
-        </flux:select>
-    </div>
 
-    <div class="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-700">
-        <table class="w-full min-w-[40rem] text-sm" data-test="players-table">
-            <thead class="bg-zinc-50 dark:bg-zinc-900">
-                <tr class="text-start">
-                    <th scope="col" class="px-4 py-3 text-start font-medium">{{ __('Name') }}</th>
-                    <th scope="col" class="px-4 py-3 text-start font-medium">{{ __('Gender') }}</th>
-                    <th scope="col" class="px-4 py-3 text-start font-medium">{{ __('DUPR ID') }}</th>
-                    <th scope="col" class="px-4 py-3 text-start font-medium">{{ __('Rating') }}</th>
-                    <th scope="col" class="px-4 py-3 text-start font-medium">{{ __('Stars') }}</th>
-                    <th scope="col" class="px-4 py-3 text-start font-medium">{{ __('Source') }}</th>
-                    <th scope="col" class="px-4 py-3 text-start font-medium">{{ __('Status') }}</th>
-                    <th scope="col" class="px-4 py-3"><span class="sr-only">{{ __('Actions') }}</span></th>
-                </tr>
-            </thead>
-            <tbody class="divide-y divide-zinc-200 dark:divide-zinc-700">
-                @forelse ($this->players as $player)
-                    <tr wire:key="player-{{ $player->id }}" @class(['text-zinc-500' => ! $player->active])>
-                        <td class="px-4 py-3 font-medium">
-                            <a href="{{ route('clubs.players.show', [$club, $player]) }}" wire:navigate class="hover:underline" data-test="player-profile-link">{{ $player->name }}</a>
-                            @if ($player->nickname)
-                                <span class="font-normal text-zinc-500" data-test="player-nickname">"{{ $player->nickname }}"</span>
-                            @endif
-                        </td>
-                        <td class="px-4 py-3" data-test="player-gender">{{ $player->gender?->label() ?? '–' }}</td>
-                        <td class="px-4 py-3 font-mono">{{ $player->dupr_id ?? '–' }}</td>
-                        <td class="px-4 py-3 tabular-nums">{{ $player->dupr_rating !== null ? number_format((float) $player->dupr_rating, 2) : '–' }}</td>
-                        <td class="px-4 py-3"><x-star-rating :stars="$player->stars" /></td>
-                        <td class="px-4 py-3">
-                            <flux:badge size="sm" :color="$player->rating_source === RatingSource::Dupr ? 'blue' : 'zinc'">
-                                {{ $player->rating_source === RatingSource::Dupr ? 'DUPR' : __('Manual') }}
-                            </flux:badge>
-                        </td>
-                        <td class="px-4 py-3">
-                            <flux:badge size="sm" :color="$player->active ? 'green' : 'zinc'">
-                                {{ $player->active ? __('Active') : __('Inactive') }}
-                            </flux:badge>
-                        </td>
-                        <td class="px-4 py-3">
-                            <div class="flex justify-end gap-1">
-                                <flux:button size="sm" variant="ghost" icon="pencil-square" wire:click="startEdit({{ $player->id }})" :aria-label="__('Edit :name', ['name' => $player->name])" data-test="edit-player-button" />
-                                @if ($player->active)
-                                    <flux:button size="sm" variant="subtle" wire:click="deactivate({{ $player->id }})" data-test="deactivate-player-button">{{ __('Deactivate') }}</flux:button>
-                                @else
-                                    <flux:button size="sm" variant="subtle" wire:click="reactivate({{ $player->id }})" data-test="reactivate-player-button">{{ __('Reactivate') }}</flux:button>
+        <div class="overflow-x-auto">
+            <table class="w-full min-w-[40rem] text-sm" data-test="players-table">
+                <thead class="bg-zinc-50 text-xs uppercase tracking-wider text-zinc-600 dark:bg-zinc-800/60 dark:text-zinc-400">
+                    <tr class="text-start">
+                        <th scope="col" class="px-4 py-3 text-start font-semibold">{{ __('Name') }}</th>
+                        <th scope="col" class="px-4 py-3 text-start font-semibold">{{ __('Gender') }}</th>
+                        <th scope="col" class="px-4 py-3 text-start font-semibold">{{ __('DUPR ID') }}</th>
+                        <th scope="col" class="px-4 py-3 text-start font-semibold">{{ __('Rating') }}</th>
+                        <th scope="col" class="px-4 py-3 text-start font-semibold">{{ __('Stars') }}</th>
+                        <th scope="col" class="px-4 py-3 text-start font-semibold">{{ __('Source') }}</th>
+                        <th scope="col" class="px-4 py-3 text-start font-semibold">{{ __('Status') }}</th>
+                        <th scope="col" class="px-4 py-3"><span class="sr-only">{{ __('Actions') }}</span></th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-zinc-200 dark:divide-zinc-700">
+                    @forelse ($this->players as $player)
+                        <tr wire:key="player-{{ $player->id }}" @class(['hover:bg-zinc-50 dark:hover:bg-zinc-800/40', 'text-zinc-600 dark:text-zinc-400' => ! $player->active, 'text-zinc-900 dark:text-zinc-100' => $player->active])>
+                            <td class="px-4 py-3 font-medium">
+                                <a href="{{ route('clubs.players.show', [$club, $player]) }}" wire:navigate class="hover:text-brand-700 hover:underline dark:hover:text-brand-400" data-test="player-profile-link">{{ $player->name }}</a>
+                                @if ($player->nickname)
+                                    <span class="font-normal text-zinc-600 dark:text-zinc-400" data-test="player-nickname">"{{ $player->nickname }}"</span>
                                 @endif
-                            </div>
-                        </td>
-                    </tr>
-                @empty
-                    <tr>
-                        <td colspan="8" class="px-4 py-10 text-center text-zinc-500" data-test="players-empty">
-                            {{ $search !== '' || $status !== 'active' ? __('No players match your filters.') : __('No players yet. Add your first player to get started.') }}
-                        </td>
-                    </tr>
-                @endforelse
-            </tbody>
-        </table>
-    </div>
+                            </td>
+                            <td class="px-4 py-3" data-test="player-gender">{{ $player->gender?->label() ?? '–' }}</td>
+                            <td class="px-4 py-3 font-mono">{{ $player->dupr_id ?? '–' }}</td>
+                            <td class="px-4 py-3 tabular-nums">{{ $player->dupr_rating !== null ? number_format((float) $player->dupr_rating, 2) : '–' }}</td>
+                            <td class="px-4 py-3"><x-star-rating :stars="$player->stars" /></td>
+                            <td class="px-4 py-3">
+                                <flux:badge size="sm" :color="$player->rating_source === RatingSource::Dupr ? 'blue' : 'zinc'">
+                                    {{ $player->rating_source === RatingSource::Dupr ? 'DUPR' : __('Manual') }}
+                                </flux:badge>
+                            </td>
+                            <td class="px-4 py-3">
+                                <flux:badge size="sm" :color="$player->active ? 'green' : 'zinc'">
+                                    {{ $player->active ? __('Active') : __('Inactive') }}
+                                </flux:badge>
+                            </td>
+                            <td class="px-4 py-3">
+                                <div class="flex justify-end gap-1">
+                                    <flux:button size="sm" variant="ghost" icon="pencil-square" class="min-h-10 min-w-10" wire:click="startEdit({{ $player->id }})" :aria-label="__('Edit :name', ['name' => $player->name])" data-test="edit-player-button" />
+                                    @if ($player->active)
+                                        <flux:button size="sm" variant="subtle" class="min-h-10" wire:click="deactivate({{ $player->id }})" data-test="deactivate-player-button">{{ __('Deactivate') }}</flux:button>
+                                    @else
+                                        <flux:button size="sm" variant="subtle" class="min-h-10" wire:click="reactivate({{ $player->id }})" data-test="reactivate-player-button">{{ __('Reactivate') }}</flux:button>
+                                    @endif
+                                </div>
+                            </td>
+                        </tr>
+                    @empty
+                        <tr>
+                            <td colspan="8" class="p-5" data-test="players-empty">
+                                @if ($search !== '' || $status !== 'active')
+                                    <x-empty-state icon="magnifying-glass" :title="__('No players match your filters.')" :description="__('Try a different name or switch the status filter.')" />
+                                @else
+                                    <x-empty-state icon="user-group" :title="__('No players yet.')" :description="__('Add your first player to get started.')">
+                                        <flux:button variant="primary" icon="plus" wire:click="startAdd">{{ __('Add player') }}</flux:button>
+                                        <flux:button icon="arrow-up-tray" wire:click="startImport">{{ __('Import CSV') }}</flux:button>
+                                    </x-empty-state>
+                                @endif
+                            </td>
+                        </tr>
+                    @endforelse
+                </tbody>
+            </table>
+        </div>
+    </x-card>
 
     {{ $this->players->links() }}
 

@@ -8,4 +8,9 @@
     };
 @endphp
 
-<flux:badge :color="$color" size="sm" data-test="session-status">{{ __(ucfirst($status->value)) }}</flux:badge>
+<flux:badge :color="$color" size="sm" data-test="session-status">
+    @if ($status->value === 'live')
+        <span class="mr-1 inline-block size-1.5 rounded-full bg-green-600 dark:bg-green-400" aria-hidden="true"></span>
+    @endif
+    {{ __(ucfirst($status->value)) }}
+</flux:badge>

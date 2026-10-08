@@ -1,136 +1,144 @@
 @php
     $record = $profile['record'];
-    $card = 'rounded-lg border border-zinc-200 p-4 dark:border-zinc-700';
+    $th = 'px-4 py-3 font-semibold';
 @endphp
 
-<section class="w-full max-w-4xl space-y-8">
-    <div class="flex flex-wrap items-start justify-between gap-4">
-        <div class="space-y-1">
-            <flux:heading size="xl" level="1" class="flex flex-wrap items-center gap-3" data-test="player-name">
-                {{ $player->name }}
-                @if ($player->nickname)
-                    <span class="font-normal text-zinc-500">"{{ $player->nickname }}"</span>
-                @endif
-                @if ($player->gender)
-                    <flux:badge size="sm" color="zinc" data-test="player-gender">{{ $player->gender->label() }}</flux:badge>
-                @endif
-                <flux:badge size="sm" :color="$player->active ? 'green' : 'zinc'">{{ $player->active ? __('Active') : __('Inactive') }}</flux:badge>
-            </flux:heading>
-            <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-zinc-600 dark:text-zinc-300">
-                <x-star-rating :stars="$player->stars" />
-                <span>{{ __('DUPR ID') }}: <span class="font-mono">{{ $player->dupr_id ?? '–' }}</span></span>
-                <span>{{ __('DUPR rating') }}: {{ $player->dupr_rating !== null ? number_format((float) $player->dupr_rating, 2) : '–' }}</span>
-            </div>
+<section class="w-full max-w-5xl space-y-6 lg:space-y-8">
+    <x-page-header
+        :eyebrow="$club->name"
+        :title="$player->name"
+        :back="route('clubs.players.index', $club)"
+        :back-label="__('Players')"
+        data-test="player-name"
+    >
+        <div class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-zinc-600 dark:text-zinc-400">
+            @if ($player->nickname)
+                <span class="font-medium">"{{ $player->nickname }}"</span>
+            @endif
+            @if ($player->gender)
+                <flux:badge size="sm" color="zinc" data-test="player-gender">{{ $player->gender->label() }}</flux:badge>
+            @endif
+            <flux:badge size="sm" :color="$player->active ? 'green' : 'zinc'">{{ $player->active ? __('Active') : __('Inactive') }}</flux:badge>
+            <x-star-rating :stars="$player->stars" />
+            <span>{{ __('DUPR ID') }}: <span class="font-mono">{{ $player->dupr_id ?? '–' }}</span></span>
+            <span>{{ __('DUPR rating') }}: {{ $player->dupr_rating !== null ? number_format((float) $player->dupr_rating, 2) : '–' }}</span>
         </div>
-        <div class="flex flex-wrap items-end gap-3">
+
+        <x-slot:actions>
             <flux:select wire:model.live="period" :label="__('Period')" class="w-48" data-test="period-select">
                 @foreach ($periods as $p)
                     <flux:select.option value="{{ $p->value }}">{{ __($p->label()) }}</flux:select.option>
                 @endforeach
             </flux:select>
-            <flux:button icon="arrow-left" :href="route('clubs.players.index', $club)" wire:navigate>{{ __('Players') }}</flux:button>
-        </div>
+        </x-slot:actions>
+    </x-page-header>
+
+    @php
+        $tiles = [
+            [__('Played'), $record['played'], 'record-played'],
+            [__('W - L'), $record['wins'].' - '.$record['losses'], 'record-wl'],
+            [__('Win %'), $record['win_pct'] !== null ? $record['win_pct'].'%' : '–', 'record-winpct'],
+            [__('Point diff'), ($record['point_diff'] > 0 ? '+' : '').$record['point_diff'], 'record-diff'],
+            [__('Sessions'), $record['sessions_attended'], 'record-sessions'],
+            [__('Last played'), $record['last_played']?->format('j M Y') ?? '–', 'record-last'],
+        ];
+    @endphp
+    <div class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6" data-test="record-cards">
+        @foreach ($tiles as [$label, $value, $test])
+            <div class="rounded-2xl border border-zinc-200 bg-white p-4 shadow-xs dark:border-zinc-700 dark:bg-zinc-900">
+                <div class="text-xs font-semibold uppercase tracking-wider text-zinc-600 dark:text-zinc-400">{{ $label }}</div>
+                <div class="mt-1 text-2xl font-bold tabular-nums text-zinc-900 dark:text-white" data-test="{{ $test }}">{{ $value }}</div>
+            </div>
+        @endforeach
     </div>
 
-    <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6" data-test="record-cards">
-        <div class="{{ $card }}"><div class="text-sm text-zinc-500">{{ __('Played') }}</div><div class="text-2xl font-semibold tabular-nums" data-test="record-played">{{ $record['played'] }}</div></div>
-        <div class="{{ $card }}"><div class="text-sm text-zinc-500">{{ __('W - L') }}</div><div class="text-2xl font-semibold tabular-nums" data-test="record-wl">{{ $record['wins'] }} - {{ $record['losses'] }}</div></div>
-        <div class="{{ $card }}"><div class="text-sm text-zinc-500">{{ __('Win %') }}</div><div class="text-2xl font-semibold tabular-nums" data-test="record-winpct">{{ $record['win_pct'] !== null ? $record['win_pct'].'%' : '–' }}</div></div>
-        <div class="{{ $card }}"><div class="text-sm text-zinc-500">{{ __('Point diff') }}</div><div class="text-2xl font-semibold tabular-nums">{{ $record['point_diff'] > 0 ? '+' : '' }}{{ $record['point_diff'] }}</div></div>
-        <div class="{{ $card }}"><div class="text-sm text-zinc-500">{{ __('Sessions') }}</div><div class="text-2xl font-semibold tabular-nums">{{ $record['sessions_attended'] }}</div></div>
-        <div class="{{ $card }}"><div class="text-sm text-zinc-500">{{ __('Last played') }}</div><div class="text-lg font-semibold">{{ $record['last_played']?->format('j M Y') ?? '–' }}</div></div>
-    </div>
-
-    <div class="grid gap-8 lg:grid-cols-2">
-        <div class="space-y-3">
-            <flux:heading size="lg">{{ __('Partners') }}</flux:heading>
-            <div class="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-700" data-test="partners-table">
+    <div class="grid gap-6 lg:grid-cols-2">
+        <x-card :title="__('Partners')" :padding="false">
+            <div class="overflow-x-auto" data-test="partners-table">
                 <table class="w-full text-sm">
-                    <thead class="bg-zinc-50 dark:bg-zinc-900">
+                    <thead class="bg-zinc-50 text-xs uppercase tracking-wider text-zinc-600 dark:bg-zinc-800/60 dark:text-zinc-400">
                         <tr>
-                            <th scope="col" class="px-3 py-2 text-start font-medium">{{ __('Partner') }}</th>
-                            <th scope="col" class="px-3 py-2 text-end font-medium">{{ __('Games') }}</th>
-                            <th scope="col" class="px-3 py-2 text-end font-medium">{{ __('Wins') }}</th>
-                            <th scope="col" class="px-3 py-2 text-end font-medium">{{ __('Win %') }}</th>
+                            <th scope="col" class="{{ $th }} text-start">{{ __('Partner') }}</th>
+                            <th scope="col" class="{{ $th }} text-end">{{ __('Games') }}</th>
+                            <th scope="col" class="{{ $th }} text-end">{{ __('Wins') }}</th>
+                            <th scope="col" class="{{ $th }} text-end">{{ __('Win %') }}</th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-zinc-200 dark:divide-zinc-700">
                         @forelse ($profile['partners'] as $row)
                             <tr wire:key="partner-{{ $row['player_id'] }}">
-                                <td class="px-3 py-2 font-medium"><a href="{{ route('clubs.players.show', [$club, $row['player_id']]) }}" wire:navigate class="hover:underline">{{ $row['name'] }}</a></td>
-                                <td class="px-3 py-2 text-end tabular-nums">{{ $row['games'] }}</td>
-                                <td class="px-3 py-2 text-end tabular-nums">{{ $row['wins'] }}</td>
-                                <td class="px-3 py-2 text-end tabular-nums">{{ $row['win_pct'] }}%</td>
+                                <td class="px-4 py-3 font-medium"><a href="{{ route('clubs.players.show', [$club, $row['player_id']]) }}" wire:navigate class="hover:text-brand-700 hover:underline dark:hover:text-brand-400">{{ $row['name'] }}</a></td>
+                                <td class="px-4 py-3 text-end tabular-nums">{{ $row['games'] }}</td>
+                                <td class="px-4 py-3 text-end tabular-nums">{{ $row['wins'] }}</td>
+                                <td class="px-4 py-3 text-end tabular-nums">{{ $row['win_pct'] }}%</td>
                             </tr>
                         @empty
-                            <tr><td colspan="4" class="px-3 py-6 text-center text-zinc-500">{{ __('No partners yet.') }}</td></tr>
+                            <tr><td colspan="4" class="px-4 py-8 text-center text-zinc-600 dark:text-zinc-400">{{ __('No partners yet.') }}</td></tr>
                         @endforelse
                     </tbody>
                 </table>
             </div>
-        </div>
+        </x-card>
 
-        <div class="space-y-3">
-            <flux:heading size="lg">{{ __('Opponents') }}</flux:heading>
-            <div class="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-700" data-test="opponents-table">
+        <x-card :title="__('Opponents')" :padding="false">
+            <div class="overflow-x-auto" data-test="opponents-table">
                 <table class="w-full text-sm">
-                    <thead class="bg-zinc-50 dark:bg-zinc-900">
+                    <thead class="bg-zinc-50 text-xs uppercase tracking-wider text-zinc-600 dark:bg-zinc-800/60 dark:text-zinc-400">
                         <tr>
-                            <th scope="col" class="px-3 py-2 text-start font-medium">{{ __('Opponent') }}</th>
-                            <th scope="col" class="px-3 py-2 text-end font-medium">{{ __('Games') }}</th>
-                            <th scope="col" class="px-3 py-2 text-end font-medium">{{ __('W') }}</th>
-                            <th scope="col" class="px-3 py-2 text-end font-medium">{{ __('L') }}</th>
+                            <th scope="col" class="{{ $th }} text-start">{{ __('Opponent') }}</th>
+                            <th scope="col" class="{{ $th }} text-end">{{ __('Games') }}</th>
+                            <th scope="col" class="{{ $th }} text-end">{{ __('W') }}</th>
+                            <th scope="col" class="{{ $th }} text-end">{{ __('L') }}</th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-zinc-200 dark:divide-zinc-700">
                         @forelse ($profile['opponents'] as $row)
                             <tr wire:key="opponent-{{ $row['player_id'] }}">
-                                <td class="px-3 py-2 font-medium"><a href="{{ route('clubs.players.show', [$club, $row['player_id']]) }}" wire:navigate class="hover:underline">{{ $row['name'] }}</a></td>
-                                <td class="px-3 py-2 text-end tabular-nums">{{ $row['games'] }}</td>
-                                <td class="px-3 py-2 text-end tabular-nums">{{ $row['wins'] }}</td>
-                                <td class="px-3 py-2 text-end tabular-nums">{{ $row['losses'] }}</td>
+                                <td class="px-4 py-3 font-medium"><a href="{{ route('clubs.players.show', [$club, $row['player_id']]) }}" wire:navigate class="hover:text-brand-700 hover:underline dark:hover:text-brand-400">{{ $row['name'] }}</a></td>
+                                <td class="px-4 py-3 text-end tabular-nums">{{ $row['games'] }}</td>
+                                <td class="px-4 py-3 text-end tabular-nums">{{ $row['wins'] }}</td>
+                                <td class="px-4 py-3 text-end tabular-nums">{{ $row['losses'] }}</td>
                             </tr>
                         @empty
-                            <tr><td colspan="4" class="px-3 py-6 text-center text-zinc-500">{{ __('No opponents yet.') }}</td></tr>
+                            <tr><td colspan="4" class="px-4 py-8 text-center text-zinc-600 dark:text-zinc-400">{{ __('No opponents yet.') }}</td></tr>
                         @endforelse
                     </tbody>
                 </table>
             </div>
-        </div>
+        </x-card>
     </div>
 
-    <div class="space-y-3">
-        <flux:heading size="lg">{{ __('Match history') }}</flux:heading>
-        <div class="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-700" data-test="history-table">
+    <x-card :title="__('Match history')" :padding="false">
+        <div class="overflow-x-auto" data-test="history-table">
             <table class="w-full text-sm">
-                <thead class="bg-zinc-50 dark:bg-zinc-900">
+                <thead class="bg-zinc-50 text-xs uppercase tracking-wider text-zinc-600 dark:bg-zinc-800/60 dark:text-zinc-400">
                     <tr>
-                        <th scope="col" class="px-3 py-2 text-start font-medium">{{ __('Date') }}</th>
-                        <th scope="col" class="px-3 py-2 text-start font-medium">{{ __('Session') }}</th>
-                        <th scope="col" class="px-3 py-2 text-start font-medium">{{ __('Partner') }}</th>
-                        <th scope="col" class="px-3 py-2 text-start font-medium">{{ __('Opponents') }}</th>
-                        <th scope="col" class="px-3 py-2 text-end font-medium">{{ __('Score') }}</th>
-                        <th scope="col" class="px-3 py-2 text-center font-medium">{{ __('Result') }}</th>
+                        <th scope="col" class="{{ $th }} text-start">{{ __('Date') }}</th>
+                        <th scope="col" class="{{ $th }} text-start">{{ __('Session') }}</th>
+                        <th scope="col" class="{{ $th }} text-start">{{ __('Partner') }}</th>
+                        <th scope="col" class="{{ $th }} text-start">{{ __('Opponents') }}</th>
+                        <th scope="col" class="{{ $th }} text-end">{{ __('Score') }}</th>
+                        <th scope="col" class="{{ $th }} text-center">{{ __('Result') }}</th>
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-zinc-200 dark:divide-zinc-700">
                     @forelse ($history as $h)
                         <tr wire:key="history-{{ $h['match_id'] }}" data-test="history-row">
-                            <td class="whitespace-nowrap px-3 py-2">{{ $h['date']->format('j M Y') }}</td>
-                            <td class="px-3 py-2"><a href="{{ route('clubs.sessions.results', [$club, $h['session_id']]) }}" wire:navigate class="hover:underline">{{ $h['session_name'] }}</a></td>
-                            <td class="px-3 py-2">{{ $h['partner'] ?? '–' }}</td>
-                            <td class="px-3 py-2">{{ implode(' & ', $h['opponents']) }}</td>
-                            <td class="whitespace-nowrap px-3 py-2 text-end font-semibold tabular-nums">{{ $h['score_for'] }} - {{ $h['score_against'] }}</td>
-                            <td class="px-3 py-2 text-center">
+                            <td class="whitespace-nowrap px-4 py-3">{{ $h['date']->format('j M Y') }}</td>
+                            <td class="px-4 py-3"><a href="{{ route('clubs.sessions.results', [$club, $h['session_id']]) }}" wire:navigate class="hover:text-brand-700 hover:underline dark:hover:text-brand-400">{{ $h['session_name'] }}</a></td>
+                            <td class="px-4 py-3">{{ $h['partner'] ?? '–' }}</td>
+                            <td class="px-4 py-3">{{ implode(' & ', $h['opponents']) }}</td>
+                            <td class="whitespace-nowrap px-4 py-3 text-end font-semibold tabular-nums">{{ $h['score_for'] }} - {{ $h['score_against'] }}</td>
+                            <td class="px-4 py-3 text-center">
                                 <flux:badge size="sm" :color="$h['won'] ? 'green' : 'red'">{{ $h['won'] ? __('W') : __('L') }}</flux:badge>
                             </td>
                         </tr>
                     @empty
-                        <tr><td colspan="6" class="px-3 py-6 text-center text-zinc-500" data-test="history-empty">{{ __('No finished matches in this period.') }}</td></tr>
+                        <tr><td colspan="6" class="px-4 py-8 text-center text-zinc-600 dark:text-zinc-400" data-test="history-empty">{{ __('No finished matches in this period.') }}</td></tr>
                     @endforelse
                 </tbody>
             </table>
         </div>
-        {{ $history->links() }}
-    </div>
+        <x-slot:footer>{{ $history->links() }}</x-slot:footer>
+    </x-card>
 </section>

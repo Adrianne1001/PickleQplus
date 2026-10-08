@@ -20,7 +20,7 @@
     <flux:dropdown position="bottom" align="start" class="w-full">
         <flux:button
             variant="subtle"
-            class="w-full justify-between"
+            class="w-full justify-between border border-zinc-200 bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-800"
             icon-trailing="chevrons-up-down"
             data-test="club-switcher"
         >
@@ -58,28 +58,35 @@
 </flux:sidebar.nav>
 
 @if ($current !== null)
-    <flux:sidebar.nav>
-        <flux:sidebar.group :heading="__('Club')" class="grid" data-test="club-nav">
-            <flux:sidebar.item icon="home" :href="route('clubs.show', $current)" :current="request()->routeIs('clubs.show')" wire:navigate>
-                {{ __('Overview') }}
-            </flux:sidebar.item>
-            <flux:sidebar.item icon="user-group" :href="route('clubs.players.index', $current)" :current="request()->routeIs('clubs.players.*')" wire:navigate>
-                {{ __('Players') }}
-            </flux:sidebar.item>
-            <flux:sidebar.item icon="calendar-days" :href="route('clubs.sessions.index', $current)" :current="request()->routeIs('clubs.sessions.*')" wire:navigate>
-                {{ __('Sessions') }}
-            </flux:sidebar.item>
-            <flux:sidebar.item icon="chart-bar" :href="route('clubs.stats', $current)" :current="request()->routeIs('clubs.stats')" wire:navigate>
-                {{ __('Stats') }}
-            </flux:sidebar.item>
-            <flux:sidebar.item icon="users" :href="route('clubs.members', $current)" :current="request()->routeIs('clubs.members*')" wire:navigate>
-                {{ __('Members') }}
-            </flux:sidebar.item>
-            @if ($isOwner)
-                <flux:sidebar.item icon="cog-6-tooth" :href="route('clubs.settings', $current)" :current="request()->routeIs('clubs.settings')" wire:navigate>
-                    {{ __('Settings') }}
+    <div data-test="club-nav" class="grid gap-1">
+        <flux:sidebar.nav>
+            <flux:sidebar.group :heading="__('Open play')" class="grid">
+                <flux:sidebar.item icon="calendar-days" :href="route('clubs.sessions.index', $current)" :current="request()->routeIs('clubs.sessions.*')" wire:navigate>
+                    {{ __('Sessions') }}
                 </flux:sidebar.item>
-            @endif
-        </flux:sidebar.group>
-    </flux:sidebar.nav>
+                <flux:sidebar.item icon="user-group" :href="route('clubs.players.index', $current)" :current="request()->routeIs('clubs.players.*')" wire:navigate>
+                    {{ __('Players') }}
+                </flux:sidebar.item>
+                <flux:sidebar.item icon="chart-bar" :href="route('clubs.stats', $current)" :current="request()->routeIs('clubs.stats')" wire:navigate>
+                    {{ __('Stats') }}
+                </flux:sidebar.item>
+            </flux:sidebar.group>
+        </flux:sidebar.nav>
+
+        <flux:sidebar.nav>
+            <flux:sidebar.group :heading="__('Club')" class="grid">
+                <flux:sidebar.item icon="home" :href="route('clubs.show', $current)" :current="request()->routeIs('clubs.show')" wire:navigate>
+                    {{ __('Overview') }}
+                </flux:sidebar.item>
+                <flux:sidebar.item icon="users" :href="route('clubs.members', $current)" :current="request()->routeIs('clubs.members*')" wire:navigate>
+                    {{ __('Members') }}
+                </flux:sidebar.item>
+                @if ($isOwner)
+                    <flux:sidebar.item icon="cog-6-tooth" :href="route('clubs.settings', $current)" :current="request()->routeIs('clubs.settings')" wire:navigate>
+                        {{ __('Settings') }}
+                    </flux:sidebar.item>
+                @endif
+            </flux:sidebar.group>
+        </flux:sidebar.nav>
+    </div>
 @endif
