@@ -10,7 +10,7 @@ use Livewire\Attributes\Locked;
 use Livewire\Component;
 
 /**
- * Recent results with Undo last and Edit score.
+ * Match history (done matches, newest first) with Undo last, Edit score and Void.
  */
 class Results extends Component
 {
@@ -22,9 +22,17 @@ class Results extends Component
     #[Locked]
     public ?int $voidingId = null;
 
+    #[Locked]
+    public int $limit = 20;
+
     public string $scoreA = '';
 
     public string $scoreB = '';
+
+    public function showMore(): void
+    {
+        $this->limit += 20;
+    }
 
     public function undoLast(MatchService $matches): void
     {
@@ -97,7 +105,8 @@ class Results extends Component
         $board = app(SessionBoard::class);
 
         return view('livewire.sessions.results', [
-            'results' => $board->recent($this->session),
+            'results' => $board->recent($this->session, $this->limit),
+            'total' => $board->doneCount($this->session),
             'lastId' => $board->lastDoneId($this->session),
         ]);
     }

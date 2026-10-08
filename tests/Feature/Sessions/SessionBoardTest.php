@@ -351,7 +351,7 @@ test('undo last reverts the most recent result and only it offers the button', f
     app(MatchService::class)->finish($session->fresh(), $match, 11, 5);
 
     Livewire::actingAs($user)->test(Results::class, ['session' => $session])
-        ->assertSee('11 - 5')
+        ->assertSeeInOrder(['11', '-', '5'])
         ->assertSeeHtml('data-test="undo-button"')
         ->call('undoLast')
         ->assertHasNoErrors();
@@ -538,4 +538,66 @@ test('a board poll runs a small fixed number of queries', function () {
     $queries = count(DB::getQueryLog());
 
     expect($queries)->toBeLessThan(25);
+});
+
+// --- match history rows ---
+
+function doneMatch(PlaySession $session, int $minutesAgo, ?int $a, ?int $b, ?int $duration = 10, MatchStatus $status = MatchStatus::Done): GameMatch
+{
+    $finished = now()->subMinutes($minutesAgo);
+
+    return GameMatch::factory()->create([
+        'play_session_id' => $session->id,
+        'status' => $status,
+        'court_no' => 1,
+        'team_a_score' => $a,
+        'team_b_score' => $b,
+        'started_at' => $duration === null ? null : $finished->copy()->subMinutes($duration),
+        'finished_at' => $finished,
+    ]);
+}
+
+test('recent rows are numbered by finish order, newest first, even when a limit cuts the list', function () {
+    [, , $session] = liveBoard(0);
+    $oldest = doneMatch($session, 50, 11, 5);
+    $middle = doneMatch($session, 30, 11, 5);
+    $newest = doneMatch($session, 10, 11, 5);
+    $board = app(SessionBoard::class);
+
+    $rows = $board->recent($session);
+    expect(array_column($rows, 'id'))->toBe([$newest->id, $middle->id, $oldest->id])
+        ->and(array_column($rows, 'number'))->toBe([3, 2, 1])
+        ->and($board->doneCount($session))->toBe(3);
+
+    $cut = $board->recent($session, 2);
+    expect(array_column($cut, 'number'))->toBe([3, 2]);
+});
+
+test('recent rows report the winner, with null for ties and missing scores', function () {
+    [, , $session] = liveBoard(0);
+    doneMatch($session, 40, 11, 7);
+    doneMatch($session, 30, 5, 11);
+    doneMatch($session, 20, 11, 11);
+    doneMatch($session, 10, null, 11);
+
+    expect(array_column(app(SessionBoard::class)->recent($session), 'winner'))->toBe([null, null, 'B', 'A']);
+});
+
+test('void and playing matches are excluded from recent and the done count', function () {
+    [, , $session] = liveBoard(0);
+    $done = doneMatch($session, 10, 11, 5);
+    doneMatch($session, 20, 11, 5, 10, MatchStatus::Void);
+    doneMatch($session, 30, null, null, 10, MatchStatus::Playing);
+    $board = app(SessionBoard::class);
+
+    expect(array_column($board->recent($session), 'id'))->toBe([$done->id])
+        ->and($board->doneCount($session))->toBe(1);
+});
+
+test('recent rows report whole-minute durations, null when a time is missing', function () {
+    [, , $session] = liveBoard(0);
+    doneMatch($session, 20, 11, 5, null);
+    doneMatch($session, 10, 11, 5, 14);
+
+    expect(array_column(app(SessionBoard::class)->recent($session), 'duration_minutes'))->toBe([14, null]);
 });

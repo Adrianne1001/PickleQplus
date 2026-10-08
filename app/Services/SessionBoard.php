@@ -23,13 +23,14 @@ use Illuminate\Support\Facades\DB;
  *
  * @phpstan-type PlayerRow array{id: int, name: string, stars: int|null, gender: string|null}
  * @phpstan-type MatchRow array{id: int, court: int|null, status: string, teams: array{A: list<PlayerRow>, B: list<PlayerRow>}, player_ids: list<int>, group: int|null, elapsed_minutes: int|null, score_a: int|null, score_b: int|null, finished_at: CarbonInterface|null, exported: bool}
+ * @phpstan-type RecentRow array{id: int, court: int|null, status: string, teams: array{A: list<PlayerRow>, B: list<PlayerRow>}, player_ids: list<int>, group: int|null, elapsed_minutes: int|null, score_a: int|null, score_b: int|null, finished_at: CarbonInterface|null, exported: bool, number: int, winner: 'A'|'B'|null, duration_minutes: int|null}
  * @phpstan-type CourtRow array{court: int, match: MatchRow|null}
  * @phpstan-type QueueRow array{id: int, name: string, stars: int|null, games_played: int, wins: int, waited_minutes: int, estimate_minutes: int|null, gender: string|null, needs_gender: bool, group: int|null, group_position: int|null}
  * @phpstan-type GroupRow array{index: int, label: string, min_stars: int, max_stars: int, courts: list<int>, waiting: int, staged: int}
  */
 class SessionBoard
 {
-    public const RECENT_LIMIT = 5;
+    public const RECENT_LIMIT = 20;
 
     public const AVERAGE_WINDOW = 10;
 
@@ -279,13 +280,14 @@ class SessionBoard
     }
 
     /**
-     * Last finished matches, newest first.
+     * Last finished matches, newest first. Each row carries its 1-based position among the
+     * session's done matches in finish order (oldest = 1), the winning team and the duration.
      *
-     * @return list<MatchRow>
+     * @return list<RecentRow>
      */
     public function recent(PlaySession $session, int $limit = self::RECENT_LIMIT): array
     {
-        return array_values(GameMatch::query()
+        $matches = GameMatch::query()
             ->where('play_session_id', $session->id)
             ->where('status', MatchStatus::Done->value)
             ->with('matchPlayers.player')
@@ -293,8 +295,38 @@ class SessionBoard
             ->orderByDesc('id')
             ->limit($limit)
             ->get()
-            ->map(fn (GameMatch $m): array => $this->matchRow($m))
-            ->all());
+            ->values();
+
+        $total = $this->doneCount($session);
+        $rows = [];
+        foreach ($matches as $index => $match) {
+            $winner = null;
+            if ($match->team_a_score !== null && $match->team_b_score !== null && $match->team_a_score !== $match->team_b_score) {
+                $winner = $match->team_a_score > $match->team_b_score ? 'A' : 'B';
+            }
+            $duration = $match->started_at === null || $match->finished_at === null
+                ? null
+                : max(0, (int) floor($match->started_at->diffInSeconds($match->finished_at, true) / 60));
+
+            $rows[] = $this->matchRow($match) + [
+                'number' => $total - $index,
+                'winner' => $winner,
+                'duration_minutes' => $duration,
+            ];
+        }
+
+        return $rows;
+    }
+
+    /**
+     * Number of done matches in the session.
+     */
+    public function doneCount(PlaySession $session): int
+    {
+        return GameMatch::query()
+            ->where('play_session_id', $session->id)
+            ->where('status', MatchStatus::Done->value)
+            ->count();
     }
 
     /**
