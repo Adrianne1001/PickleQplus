@@ -176,7 +176,7 @@ test('the public view exposes the mode and never a gender', function () {
 
     expect($snap['mode'])->toBe('mixed')
         ->and(json_encode($snap))->not->toContain('gender')
-        ->and(array_keys($snap['waiting'][0]))->toBe(['position', 'id', 'name', 'estimate_minutes', 'group', 'group_position']);
+        ->and(array_keys($snap['waiting'][0]))->toBe(['position', 'id', 'name', 'wins', 'estimate_minutes', 'group', 'group_position']);
 });
 
 test('finishing a match keeps staging and playing mixed matches only', function () {

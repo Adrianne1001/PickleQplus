@@ -56,6 +56,7 @@
                             </div>
                             <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-zinc-600 dark:text-zinc-400">
                                 <span>{{ trans_choice(':count game|:count games', $row['games_played']) }}</span>
+                                <span data-test="player-wins">{{ trans_choice(':count win|:count wins', $row['wins']) }}</span>
                                 <span>{{ __('waited :min min', ['min' => $row['waited_minutes']]) }}</span>
                             </div>
                             @if ($row['needs_gender'])
@@ -89,7 +90,7 @@
                 @foreach ($onBreak as $row)
                     <li class="flex items-center justify-between gap-2 px-4 py-2.5" wire:key="break-{{ $row['id'] }}">
                         <span class="flex items-center gap-2 font-medium text-zinc-900 dark:text-white">{{ $row['name'] }}@if ($mixed) <x-gender-marker :gender="$row['gender']" />@endif</span>
-                        <span class="text-sm text-zinc-600 dark:text-zinc-400">{{ trans_choice(':count game|:count games', $row['games_played']) }}</span>
+                        <span class="text-sm text-zinc-600 dark:text-zinc-400">{{ trans_choice(':count game|:count games', $row['games_played']) }} · <span data-test="player-wins">{{ trans_choice(':count win|:count wins', $row['wins']) }}</span></span>
                     </li>
                 @endforeach
             </ul>

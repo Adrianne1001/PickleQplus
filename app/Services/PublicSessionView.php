@@ -14,7 +14,8 @@ use App\Models\SessionPlayer;
  * stars, DUPR data or match ids. Board ordering and wait estimates come from
  * SessionBoard.
  *
- * @phpstan-type PublicPlayer array{id: string, name: string}
+ * @phpstan-type PublicPlayer array{id: string, name: string, wins: int}
+ * @phpstan-type PublicRosterRow array{id: string, name: string, games_played: int, wins: int}
  * @phpstan-type PublicMatch array{teams: array{A: list<PublicPlayer>, B: list<PublicPlayer>}, player_ids: list<string>, group: int|null, elapsed_minutes: int|null}
  * @phpstan-type PublicGroup array{index: int, label: string, courts: list<int>}
  * @phpstan-type PublicSnapshot array{
@@ -24,9 +25,9 @@ use App\Models\SessionPlayer;
  *     courts: list<array{court: int, match: PublicMatch|null}>,
  *     groups: list<PublicGroup>,
  *     up_next: list<PublicMatch>,
- *     waiting: list<array{position: int, id: string, name: string, estimate_minutes: int|null, group: int|null, group_position: int|null}>,
+ *     waiting: list<array{position: int, id: string, name: string, wins: int, estimate_minutes: int|null, group: int|null, group_position: int|null}>,
  *     on_break: list<PublicPlayer>,
- *     players: list<PublicPlayer>
+ *     players: list<PublicRosterRow>
  * }
  */
 class PublicSessionView
@@ -61,13 +62,14 @@ class PublicSessionView
         }
         $publicName = fn (int $id): string => $names[$id] ?? '';
         $publicId = fn (int $id): string => $pub[$id] ?? '';
+        $wins = $this->board->winsByPlayer($session);
 
         /** @param  array{teams: array{A: list<array{id: int}>, B: list<array{id: int}>}, player_ids: list<int>, group: int|null, elapsed_minutes: int|null}  $row */
-        $match = function (array $row) use ($publicName, $publicId): array {
+        $match = function (array $row) use ($publicName, $publicId, $wins): array {
             $teams = ['A' => [], 'B' => []];
             foreach (['A', 'B'] as $team) {
                 foreach ($row['teams'][$team] as $p) {
-                    $teams[$team][] = ['id' => $publicId($p['id']), 'name' => $publicName($p['id'])];
+                    $teams[$team][] = ['id' => $publicId($p['id']), 'name' => $publicName($p['id']), 'wins' => $wins[$p['id']] ?? 0];
                 }
             }
 
@@ -84,13 +86,14 @@ class PublicSessionView
             $courts[] = ['court' => $c['court'], 'match' => $c['match'] === null ? null : $match($c['match'])];
         }
 
-        $waitingRows = $this->board->waiting($session);
+        $waitingRows = $this->board->waiting($session, $wins);
         $waiting = [];
         foreach ($waitingRows as $i => $row) {
             $waiting[] = [
                 'position' => $i + 1,
                 'id' => $publicId($row['id']),
                 'name' => $publicName($row['id']),
+                'wins' => $row['wins'],
                 'estimate_minutes' => $row['estimate_minutes'],
                 'group' => $row['group'],
                 'group_position' => $row['group_position'],
@@ -104,17 +107,18 @@ class PublicSessionView
         }
 
         $onBreak = [];
-        foreach ($this->board->onBreak($session) as $row) {
-            $onBreak[] = ['id' => $publicId($row['id']), 'name' => $publicName($row['id'])];
+        foreach ($this->board->onBreak($session, $wins) as $row) {
+            $onBreak[] = ['id' => $publicId($row['id']), 'name' => $publicName($row['id']), 'wins' => $row['wins']];
         }
 
         $players = [];
-        $ids = SessionPlayer::query()
+        $entries = SessionPlayer::query()
             ->where('play_session_id', $session->id)
             ->where('status', '!=', SessionPlayerStatus::Left->value)
-            ->pluck('player_id');
-        foreach ($ids as $id) {
-            $players[] = ['id' => $publicId((int) $id), 'name' => $publicName((int) $id)];
+            ->get(['player_id', 'games_played']);
+        foreach ($entries as $entry) {
+            $id = $entry->player_id;
+            $players[] = ['id' => $publicId($id), 'name' => $publicName($id), 'games_played' => $entry->games_played, 'wins' => $wins[$id] ?? 0];
         }
         usort($players, fn (array $a, array $b): int => strcasecmp($a['name'], $b['name']) ?: $a['id'] <=> $b['id']);
 

@@ -59,7 +59,7 @@
                         <flux:badge size="sm" :color="match ($entry->status->value) { 'playing' => 'green', 'break' => 'amber', default => 'zinc' }">
                             {{ __(ucfirst($entry->status->value)) }}
                         </flux:badge>
-                        <span class="text-sm text-zinc-600 dark:text-zinc-400">{{ trans_choice(':count game|:count games', $entry->games_played) }}</span>
+                        <span class="text-sm text-zinc-600 dark:text-zinc-400">{{ trans_choice(':count game|:count games', $entry->games_played) }} · <span data-test="player-wins">{{ trans_choice(':count win|:count wins', $wins[$entry->player_id] ?? 0) }}</span></span>
                     </div>
                     @unless ($session->isEnded())
                         <div class="flex flex-wrap gap-2">

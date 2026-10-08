@@ -5,6 +5,7 @@ namespace App\Livewire\Public;
 use App\Livewire\Public\Concerns\LoadsPublicSession;
 use App\Models\Club;
 use App\Models\PlaySession;
+use App\Services\CheckInQrService;
 use App\Services\PublicSessionView;
 use App\Services\StatsService;
 use Illuminate\Contracts\View\View;
@@ -59,7 +60,7 @@ class Queue extends Component
         return $this->live['status'] === 'ended' ? [] : $this->listenersForSession();
     }
 
-    public function render(): View
+    public function render(CheckInQrService $qr): View
     {
         $snapshot = $this->snapshot ?? $this->loadSnapshot();
 
@@ -70,7 +71,12 @@ class Queue extends Component
             $results = app(StatsService::class)->publicEndedSession($session->club ?? abort(404), $session);
         }
 
+        // This page's own URL only. Never the check-in or TV link.
+        $shareUrl = url('/c/'.$this->clubSlug.'/s/'.$this->resolveSession()->public_id);
+
         return view('livewire.public.queue', [
+            'shareUrl' => $shareUrl,
+            'shareSvg' => $qr->svgForUrl($shareUrl, 320),
             'data' => $snapshot,
             'results' => $results,
         ]);

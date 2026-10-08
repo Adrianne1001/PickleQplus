@@ -14,7 +14,7 @@ use Livewire\Attributes\On;
 use Livewire\Component;
 
 /**
- * Organizer board panel: check-in QR, regenerate, and the public share links.
+ * Organizer board share panel: QR codes and links for check-in, the public queue and the TV.
  */
 class CheckInQr extends Component
 {
@@ -68,11 +68,16 @@ class CheckInQr extends Component
         $club = $this->session->club()->firstOrFail();
         $base = url('/c/'.$club->slug.'/s/'.$this->session->public_id);
 
+        $ended = $this->session->isEnded();
+        $tvUrl = url('/c/'.$club->slug.'/tv/'.$this->session->tv_id);
+
         return view('livewire.sessions.check-in-qr', [
             'svg' => $this->session->isEnded() ? null : $qr->svg($this->session, 320),
             'checkinUrl' => $this->session->isEnded() ? null : $qr->url($this->session),
             'queueUrl' => $base,
-            'tvUrl' => url('/c/'.$club->slug.'/tv/'.$this->session->tv_id),
+            'tvUrl' => $tvUrl,
+            'queueSvg' => $qr->svgForUrl($base, 320),
+            'tvSvg' => $ended ? null : $qr->svgForUrl($tvUrl, 320),
         ]);
     }
 }

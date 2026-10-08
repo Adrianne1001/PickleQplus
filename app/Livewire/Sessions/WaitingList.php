@@ -30,11 +30,12 @@ class WaitingList extends Component
     {
         $board = app(SessionBoard::class);
 
-        $waiting = $board->waiting($this->session);
+        $wins = $board->winsByPlayer($this->session);
+        $waiting = $board->waiting($this->session, $wins);
 
         return view('livewire.sessions.waiting-list', [
             'waiting' => $waiting,
-            'onBreak' => $board->onBreak($this->session),
+            'onBreak' => $board->onBreak($this->session, $wins),
             'mixed' => $board->mode($this->session) === 'mixed',
             'unplaceable' => $board->unplaceableIn($waiting),
             'groups' => $board->groups($this->session, $waiting),

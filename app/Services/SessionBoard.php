@@ -15,6 +15,7 @@ use App\Services\Rotation\SkillCourtsStrategy;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Read-only view data for the organizer board. Changes no state: it returns
@@ -23,7 +24,7 @@ use Illuminate\Support\Collection;
  * @phpstan-type PlayerRow array{id: int, name: string, stars: int|null, gender: string|null}
  * @phpstan-type MatchRow array{id: int, court: int|null, status: string, teams: array{A: list<PlayerRow>, B: list<PlayerRow>}, player_ids: list<int>, group: int|null, elapsed_minutes: int|null, score_a: int|null, score_b: int|null, finished_at: CarbonInterface|null, exported: bool}
  * @phpstan-type CourtRow array{court: int, match: MatchRow|null}
- * @phpstan-type QueueRow array{id: int, name: string, stars: int|null, games_played: int, waited_minutes: int, estimate_minutes: int|null, gender: string|null, needs_gender: bool, group: int|null, group_position: int|null}
+ * @phpstan-type QueueRow array{id: int, name: string, stars: int|null, games_played: int, wins: int, waited_minutes: int, estimate_minutes: int|null, gender: string|null, needs_gender: bool, group: int|null, group_position: int|null}
  * @phpstan-type GroupRow array{index: int, label: string, min_stars: int, max_stars: int, courts: list<int>, waiting: int, staged: int}
  */
 class SessionBoard
@@ -94,9 +95,10 @@ class SessionBoard
      * Waiting players who are not in a staged or playing match, in engine
      * priority order, each with a wait estimate. Position 0 is first in line.
      *
+     * @param  array<int, int>  $wins  from winsByPlayer(); when omitted every row has wins 0 and no query runs
      * @return list<QueueRow>
      */
-    public function waiting(PlaySession $session): array
+    public function waiting(PlaySession $session, array $wins = []): array
     {
         $open = GameMatch::query()
             ->where('play_session_id', $session->id)
@@ -152,7 +154,7 @@ class SessionBoard
                 $stars = $entry->player?->stars;
                 $group = $stars === null ? null : $skill->tryGroupForStars($stars);
                 if ($group === null) {
-                    $rows[] = $this->queueRow($entry, null);
+                    $rows[] = $this->queueRow($entry, null, $wins);
 
                     continue;
                 }
@@ -161,7 +163,7 @@ class SessionBoard
                 $courts = $skill->courtRange($group);
                 $groupElapsed = array_values(array_intersect_key($elapsedByCourt, array_flip($courts)));
                 $estimate = $this->estimator->estimate($inGroup, count($courts), $stagedByGroup[$group] ?? 0, $groupElapsed, $average);
-                $rows[] = $this->queueRow($entry, $estimate, false, $group, $inGroup + 1);
+                $rows[] = $this->queueRow($entry, $estimate, $wins, false, $group, $inGroup + 1);
 
                 continue;
             }
@@ -184,7 +186,7 @@ class SessionBoard
             } else {
                 $estimate = $this->estimator->estimate($position, $session->courts, $stagedCount, $elapsed, $average);
             }
-            $rows[] = $this->queueRow($entry, $estimate, $mixed);
+            $rows[] = $this->queueRow($entry, $estimate, $wins, $mixed);
         }
 
         return $rows;
@@ -265,12 +267,14 @@ class SessionBoard
     /**
      * Players on break, longest on break first.
      *
+     * @param  array<int, int>  $wins  from winsByPlayer(); when omitted every row has wins 0 and no query runs
      * @return list<QueueRow>
      */
-    public function onBreak(PlaySession $session): array
+    public function onBreak(PlaySession $session, array $wins = []): array
     {
+
         return array_values($this->entries($session, SessionPlayerStatus::Break)
-            ->map(fn (SessionPlayer $e): array => $this->queueRow($e, null))
+            ->map(fn (SessionPlayer $e): array => $this->queueRow($e, null, $wins))
             ->all());
     }
 
@@ -333,6 +337,35 @@ class SessionBoard
     }
 
     /**
+     * Wins in this session per player id (one grouped query). A win is a done match with both
+     * scores set where the player's team scored higher. Players with no wins are absent.
+     *
+     * @return array<int, int>
+     */
+    public function winsByPlayer(PlaySession $session): array
+    {
+        $rows = DB::table('match_players as mp')
+            ->join('matches as m', 'm.id', '=', 'mp.match_id')
+            ->where('m.play_session_id', $session->id)
+            ->where('m.status', MatchStatus::Done->value)
+            ->whereNotNull('m.team_a_score')
+            ->whereNotNull('m.team_b_score')
+            ->groupBy('mp.player_id')
+            ->selectRaw('mp.player_id as player_id')
+            ->selectRaw('sum(case when '.StatsService::WON_SQL.' then 1 else 0 end) as wins')
+            ->get();
+
+        $wins = [];
+        foreach ($rows as $row) {
+            if ((int) $row->wins > 0) {
+                $wins[(int) $row->player_id] = (int) $row->wins;
+            }
+        }
+
+        return $wins;
+    }
+
+    /**
      * @return list<GameMatch>
      */
     private function matches(PlaySession $session, MatchStatus $status): array
@@ -364,15 +397,17 @@ class SessionBoard
     }
 
     /**
+     * @param  array<int, int>  $wins
      * @return QueueRow
      */
-    private function queueRow(SessionPlayer $entry, ?int $estimate, bool $mixed = false, ?int $group = null, ?int $groupPosition = null): array
+    private function queueRow(SessionPlayer $entry, ?int $estimate, array $wins, bool $mixed = false, ?int $group = null, ?int $groupPosition = null): array
     {
         return [
             'id' => $entry->player_id,
             'name' => $entry->player === null ? '' : $entry->player->name,
             'stars' => $entry->player === null ? null : $entry->player->stars,
             'games_played' => $entry->games_played,
+            'wins' => $wins[$entry->player_id] ?? 0,
             'waited_minutes' => $this->minutesSince($entry->queued_at ?? $entry->checked_in_at),
             'estimate_minutes' => $estimate,
             'gender' => $entry->player?->gender?->value,

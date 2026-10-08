@@ -8,6 +8,7 @@ use App\Models\PlaySession;
 use App\Models\SessionPlayer;
 use App\Models\User;
 use App\Services\CheckInService;
+use App\Services\SessionBoard;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Validation\ValidationException;
@@ -141,7 +142,9 @@ class CheckInPanel extends Component
 
     public function render(): View
     {
-        return view('livewire.sessions.check-in-panel');
+        return view('livewire.sessions.check-in-panel', [
+            'wins' => app(SessionBoard::class)->winsByPlayer($this->session),
+        ]);
     }
 
     /**

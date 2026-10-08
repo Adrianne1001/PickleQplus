@@ -39,6 +39,9 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
  */
 class StatsService
 {
+    /** SQL condition: the match_players row (mp) is on the higher-scoring team of match m. */
+    public const WON_SQL = "(mp.team = 'A' and m.team_a_score > m.team_b_score) or (mp.team = 'B' and m.team_b_score > m.team_a_score)";
+
     public const PER_PAGE = 20;
 
     public const PUBLIC_CACHE_SECONDS = 60;
@@ -357,7 +360,7 @@ class StatsService
      */
     private function aggregate(int $clubId, callable $scope, bool $activeOnly = false): array
     {
-        $won = "(mp.team = 'A' and m.team_a_score > m.team_b_score) or (mp.team = 'B' and m.team_b_score > m.team_a_score)";
+        $won = self::WON_SQL;
 
         $query = DB::table('match_players as mp')
             ->join('matches as m', 'm.id', '=', 'mp.match_id')

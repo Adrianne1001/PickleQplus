@@ -26,8 +26,28 @@
     @if ($data['status'] !== 'ended') wire:poll.30s.visible @endif
     data-test="queue-page"
 >
-    <header class="space-y-2">
-        <x-brand size="sm" />
+    <header class="space-y-2" x-data="{ shareOpen: false, copied: false, canShare: typeof navigator.share === 'function' }">
+        <div class="flex items-center justify-between gap-3">
+            <x-brand size="sm" />
+            <button type="button" class="inline-flex min-h-11 items-center gap-2 rounded-xl border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-900 hover:bg-zinc-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600 dark:border-zinc-600 dark:bg-zinc-900 dark:text-white dark:hover:bg-zinc-800"
+                x-on:click="shareOpen = ! shareOpen" x-bind:aria-expanded="shareOpen" aria-controls="share-queue-panel" data-test="share-queue-button">
+                <svg class="size-4" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="3" width="5.5" height="5.5" rx="1"/><rect x="11.5" y="3" width="5.5" height="5.5" rx="1"/><rect x="3" y="11.5" width="5.5" height="5.5" rx="1"/><path d="M11.5 11.5h2.5v2.5m3 0v3h-3m-2.5 0v-1" stroke-linecap="round"/></svg>
+                {{ __('Share') }}
+            </button>
+        </div>
+        <div id="share-queue-panel" x-show="shareOpen" x-cloak class="rounded-2xl border border-zinc-200 bg-white p-5 text-center shadow-xs dark:border-zinc-700 dark:bg-zinc-900" data-test="share-queue-panel">
+            <div class="mx-auto w-full max-w-64 rounded-xl bg-white p-3 text-zinc-900 shadow-sm ring-1 ring-zinc-200 [&>svg]:h-auto [&>svg]:w-full" data-test="public-queue-qr" role="img" aria-label="{{ __('QR code for this queue') }}">{!! $shareSvg !!}</div>
+            <p class="mt-3 font-semibold text-zinc-900 dark:text-white">{{ __('Scan to follow this queue') }}</p>
+            <input type="text" readonly value="{{ $shareUrl }}" x-ref="shareUrl" x-on:focus="$el.select()" aria-label="{{ __('Queue link') }}" class="mt-2 w-full rounded-lg border border-zinc-300 bg-zinc-50 px-3 py-2 text-center text-xs text-zinc-900 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-brand-600 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100" data-test="queue-share-url" />
+            <div class="mt-4 flex flex-wrap justify-center gap-2">
+                <button type="button" class="min-h-11 rounded-xl bg-brand-700 px-4 py-2 font-semibold text-white hover:bg-brand-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
+                    x-on:click="$refs.shareUrl.focus(); $refs.shareUrl.select(); try { (navigator.clipboard ? navigator.clipboard.writeText($refs.shareUrl.value) : Promise.resolve(document.execCommand('copy'))).then(() => { copied = true; setTimeout(() => copied = false, 2000) }).catch(() => {}) } catch (e) {}" data-test="copy-queue-link">
+                    <span x-show="!copied">{{ __('Copy link') }}</span><span x-show="copied" x-cloak role="status">{{ __('Copied') }}</span>
+                </button>
+                <button type="button" x-show="canShare" x-cloak class="min-h-11 rounded-xl border border-zinc-300 px-4 py-2 font-medium hover:bg-zinc-100 dark:border-zinc-600 dark:hover:bg-zinc-800"
+                    x-on:click="navigator.share({ title: @js($data['name']), url: @js($shareUrl) }).catch(() => {})" data-test="native-share">{{ __('Share…') }}</button>
+            </div>
+        </div>
         <h1 class="text-2xl font-bold tracking-tight sm:text-3xl" data-test="queue-title">{{ $data['name'] }}</h1>
         <div class="flex flex-wrap items-center gap-2">
             @if ($live)
@@ -114,22 +134,14 @@
             <h2 id="courts-h" class="mb-3 text-lg font-bold">{{ __('Courts') }}</h2>
             <ul class="space-y-3">
                 @foreach ($data['courts'] as $court)
-                    <li class="rounded-2xl border p-4 {{ $court['match'] ? 'border-brand-300 bg-white dark:border-brand-700 dark:bg-zinc-900' : 'border-dashed border-zinc-300 bg-transparent dark:border-zinc-700' }}" wire:key="court-{{ $court['court'] }}" data-test="queue-court">
-                        <div class="flex items-center justify-between gap-2">
-                            <span class="font-semibold">{{ __('Court :n', ['n' => $court['court']]) }}@if (isset($courtGroup[$court['court']]))<span class="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-900 dark:bg-amber-900 dark:text-amber-100" data-test="queue-court-group">{{ $courtGroup[$court['court']] }}</span>@endif</span>
-                            @if ($court['match'] && $court['match']['elapsed_minutes'] !== null)
-                                <span class="text-sm tabular-nums text-zinc-600 dark:text-zinc-400">{{ $court['match']['elapsed_minutes'] }} {{ __('min') }}</span>
-                            @endif
-                        </div>
-                        @if ($court['match'])
-                            <p class="mt-2 text-lg leading-snug">
-                                @foreach ($court['match']['teams']['A'] as $p)<x-public.player :id="$p['id']" :name="$p['name']" />{{ $loop->last ? '' : ' & ' }}@endforeach
-                                <span class="text-sm font-semibold uppercase text-zinc-600 dark:text-zinc-400">{{ __('vs') }}</span>
-                                @foreach ($court['match']['teams']['B'] as $p)<x-public.player :id="$p['id']" :name="$p['name']" />{{ $loop->last ? '' : ' & ' }}@endforeach
-                            </p>
-                        @else
-                            <p class="mt-1 text-zinc-600 dark:text-zinc-400">{{ __('Open') }}</p>
-                        @endif
+                    <li wire:key="court-{{ $court['court'] }}" data-test="queue-court">
+                        <x-public.match-board
+                            :teams="$court['match']['teams'] ?? []"
+                            :title="__('Court :n', ['n' => $court['court']])"
+                            :group="$courtGroup[$court['court']] ?? null"
+                            :elapsed="$court['match']['elapsed_minutes'] ?? null"
+                            :open="! $court['match']"
+                        />
                     </li>
                 @endforeach
             </ul>
@@ -143,10 +155,8 @@
                 @endif
                 <ul class="space-y-2">
                     @forelse ($section['matches'] as $i => $match)
-                        <li class="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-lg leading-snug text-zinc-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-50" wire:key="upnext-{{ $section['label'] }}-{{ $i }}">
-                            @foreach ($match['teams']['A'] as $p)<x-public.player :id="$p['id']" :name="$p['name']" />{{ $loop->last ? '' : ' & ' }}@endforeach
-                            <span class="text-sm font-semibold uppercase text-zinc-600 dark:text-zinc-400">{{ __('vs') }}</span>
-                            @foreach ($match['teams']['B'] as $p)<x-public.player :id="$p['id']" :name="$p['name']" />{{ $loop->last ? '' : ' & ' }}@endforeach
+                        <li wire:key="upnext-{{ $section['label'] }}-{{ $i }}">
+                            <x-public.match-board :teams="$match['teams']" :title="$i === 0 ? __('Next') : __('Match :n', ['n' => $i + 1])" compact />
                         </li>
                     @empty
                         <li class="text-zinc-600 dark:text-zinc-400">{{ __('Nobody staged yet.') }}</li>
@@ -182,10 +192,25 @@
         @if ($data['on_break'])
             <section aria-labelledby="break-h" data-test="queue-break">
                 <h2 id="break-h" class="mb-2 text-lg font-bold">{{ __('On break') }}</h2>
-                <p class="text-lg text-zinc-700 dark:text-zinc-300">
-                    @foreach ($data['on_break'] as $p)<x-public.player :id="$p['id']" :name="$p['name']" />{{ $loop->last ? '' : ', ' }}@endforeach
-                </p>
+                <ul class="flex flex-wrap gap-x-4 gap-y-2 text-lg text-zinc-700 dark:text-zinc-300">
+                    @foreach ($data['on_break'] as $p)
+                        <li class="flex items-center gap-1.5"><x-public.player :id="$p['id']" :name="$p['name']" /></li>
+                    @endforeach
+                </ul>
             </section>
         @endif
+        <section aria-labelledby="players-h" data-test="queue-players">
+            <h2 id="players-h" class="mb-3 text-lg font-bold">{{ __('Players (:count)', ['count' => count($data['players'])]) }}</h2>
+            <ul class="divide-y divide-zinc-200 overflow-hidden rounded-2xl border border-zinc-200 bg-white dark:divide-zinc-700 dark:border-zinc-700 dark:bg-zinc-900">
+                @forelse ($data['players'] as $p)
+                    <li class="flex items-center justify-between gap-3 px-4 py-3 text-lg" wire:key="player-{{ $p['id'] }}">
+                        <span class="min-w-0 [overflow-wrap:anywhere]"><x-public.player :id="$p['id']" :name="$p['name']" /></span>
+                        <span class="shrink-0 text-sm text-zinc-600 dark:text-zinc-400"><span data-test="player-games">{{ trans_choice(':count game|:count games', $p['games_played'] ?? 0) }}</span> · <span data-test="player-wins">{{ trans_choice(':count win|:count wins', $p['wins'] ?? 0) }}</span></span>
+                    </li>
+                @empty
+                    <li class="px-4 py-6 text-center text-zinc-600 dark:text-zinc-400">{{ __('Nobody has checked in yet.') }}</li>
+                @endforelse
+            </ul>
+        </section>
     @endif
 </main>
