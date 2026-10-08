@@ -48,6 +48,9 @@ class AppServiceProvider extends ServiceProvider
     {
         RateLimiter::for('registration', fn (Request $request): Limit => Limit::perHour((int) config('pickleq.registrations_per_hour'))
             ->by('registration:'.$request->ip()));
+
+        // Public podium images (P11.3): drawing is CPU work, so 300 a minute per IP (renders are limited to 30 a minute in the controller).
+        RateLimiter::for('podium', fn (Request $request): Limit => Limit::perMinute(300)->by('podium:'.$request->ip()));
     }
 
     /**

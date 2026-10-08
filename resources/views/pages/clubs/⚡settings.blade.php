@@ -26,7 +26,6 @@ new #[Title('Club settings')] class extends Component {
     public string $late_arrival_policy = 'minimum';
     public bool $allow_concurrent_sessions = false;
 
-    public bool $public_stats = false;
     public string $leaderboard_min_games = '10';
 
     public string $confirmName = '';
@@ -47,7 +46,6 @@ new #[Title('Club settings')] class extends Component {
         $this->default_courts = (string) $this->club->default_courts;
         $this->late_arrival_policy = $this->club->late_arrival_policy->value;
         $this->allow_concurrent_sessions = $this->club->allow_concurrent_sessions;
-        $this->public_stats = $this->club->public_stats;
         $this->leaderboard_min_games = (string) $this->club->leaderboard_min_games;
         $this->star_bands = array_map(
             fn ($b): string => number_format((float) $b, 2, '.', ''),
@@ -110,7 +108,6 @@ new #[Title('Club settings')] class extends Component {
         $this->authorize('manageSettings', $this->club);
 
         $clubs->updateStatsSettings($this->club, [
-            'public_stats' => $this->public_stats,
             'leaderboard_min_games' => $this->leaderboard_min_games,
         ]);
 
@@ -180,7 +177,7 @@ new #[Title('Club settings')] class extends Component {
 }; ?>
 
 <section class="w-full max-w-3xl space-y-6 lg:space-y-8">
-    <x-page-header :eyebrow="$club->name" :title="__('Club settings')" :description="__('Details, star bands, session rules and public stats for this club.')" :back="route('clubs.show', $club)" :back-label="__('Club overview')" />
+    <x-page-header :eyebrow="$club->name" :title="__('Club settings')" :description="__('Details, star bands, session rules and the leaderboard for this club.')" :back="route('clubs.show', $club)" :back-label="__('Club overview')" />
 
     {{-- Details --}}
     <form wire:submit="saveDetails" data-test="details-form">
@@ -312,19 +309,8 @@ new #[Title('Club settings')] class extends Component {
 
     {{-- Stats (P5.2b) --}}
     <form wire:submit="saveStatsSettings" data-test="stats-settings-form">
-        <x-card :title="__('Stats')" :description="__('Who can see leaderboards and results.')">
+        <x-card :title="__('Stats')" :description="__('How the club leaderboard ranks players.')">
             <div class="space-y-5">
-                <flux:field variant="inline">
-                    <flux:checkbox wire:model="public_stats" data-test="public-stats" />
-                    <flux:label>{{ __('Public stats') }}</flux:label>
-                    <flux:description>{{ __('Off by default. Shows a public leaderboard and the final results of ended sessions to anyone with the link. Only display names are shown.') }}</flux:description>
-                </flux:field>
-                <flux:error name="public_stats" />
-
-                @if ($club->public_stats)
-                    <x-copy-field :label="__('Public leaderboard link')" :value="route('public.stats', $club)" test="public-stats-url" />
-                @endif
-
                 <flux:input
                     wire:model="leaderboard_min_games"
                     :label="__('Leaderboard minimum games')"

@@ -3,9 +3,12 @@
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DuprExportDownloadController;
 use App\Http\Controllers\InvitationAcceptController;
+use App\Http\Controllers\PodiumImageController;
+use App\Http\Controllers\PublicClubRedirectController;
 use App\Livewire\Players\Show as PlayerShow;
 use App\Livewire\Public\CheckIn as PublicCheckIn;
 use App\Livewire\Public\Queue as PublicQueue;
+use App\Livewire\Public\Sessions;
 use App\Livewire\Public\Tv as PublicTv;
 use App\Livewire\Sessions\DuprExportPage;
 use App\Livewire\Sessions\Form as SessionForm;
@@ -14,7 +17,12 @@ use App\Livewire\Sessions\ResultsPage as SessionResultsPage;
 use App\Livewire\Sessions\Show as SessionShow;
 use App\Livewire\Stats\Leaderboard as StatsLeaderboard;
 use App\Livewire\Stats\PublicLeaderboard;
+use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
+use Illuminate\Cookie\Middleware\EncryptCookies;
+use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
+use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\Route;
+use Illuminate\View\Middleware\ShareErrorsFromSession;
 
 Route::view('/', 'welcome')->name('home');
 
@@ -66,10 +74,24 @@ Route::middleware(['auth', 'verified'])->group(function () {
 Route::livewire('c/{club:slug}/s/{publicId}', PublicQueue::class)
     ->where('publicId', '[a-z0-9]+')
     ->name('public.queue');
+// Podium images are stateless: no session, CSRF or cookies, so they cache cleanly.
+$statelessImage = [StartSession::class, ShareErrorsFromSession::class, PreventRequestForgery::class, AddQueuedCookiesToResponse::class, EncryptCookies::class];
+Route::get('c/{club:slug}/s/{publicId}/podium.gif', [PodiumImageController::class, 'gif'])
+    ->where('publicId', '[a-z0-9]+')
+    ->middleware('throttle:podium')
+    ->withoutMiddleware($statelessImage)
+    ->name('public.session.podium-gif');
+Route::get('c/{club:slug}/s/{publicId}/podium.png', [PodiumImageController::class, 'png'])
+    ->where('publicId', '[a-z0-9]+')
+    ->middleware('throttle:podium')
+    ->withoutMiddleware($statelessImage)
+    ->name('public.session.podium-png');
 Route::livewire('c/{club:slug}/tv/{tvId}', PublicTv::class)
     ->where('tvId', '[A-Za-z0-9]+')
     ->name('public.tv');
 Route::livewire('c/{club:slug}/stats', PublicLeaderboard::class)->name('public.stats');
+Route::livewire('c/{club:slug}/sessions', Sessions::class)->name('public.sessions');
+Route::get('c/{club:slug}', PublicClubRedirectController::class)->name('public.club');
 Route::livewire('checkin/{token}', PublicCheckIn::class)
     ->where('token', '[A-Za-z0-9]+')
     ->name('public.checkin');

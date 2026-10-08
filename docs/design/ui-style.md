@@ -72,3 +72,23 @@ Don't
 - Don't put domain logic in views or components.
 - Don't add `@fluxAppearance`, `class="dark"` on `<html>`, or `prefers-color-scheme` scripts.
 - Don't make the TV page theme-dependent: it stays dark and read-only.
+
+## 6. Results and share (Phase 11)
+
+The results design is shared by the staff page (`Livewire/Sessions/ResultsPage`) and the public ended page (`Livewire/Public/Queue`). Both render `<x-results.body>` so they look identical.
+
+- `<x-results.body :results :standings staff live>`: the whole layout. Slots: `neighbours` (prev/next) and `share` (the share panel or a note). `results` is the `SessionResultsService` array.
+- `<x-results.hero>`: always a dark brand gradient (`from-brand-700 to-brand-950`) with white text, in both themes, so a screenshot looks the same. Holds club, session, date, four headline numbers and the confetti. Its slot is the podium.
+- `<x-results.podium :podium>`: 2nd left, 1st centre and tallest, 3rd right. Medal and height come from the rank, so ties look the same. Fewer than 3 players give a smaller podium, none gives an empty state.
+- `<x-results.highlights>`: cards for most games, best point diff, closest match, biggest win. Missing ones are hidden.
+- `<x-results.share-panel>`: copy link (`x-copy-field`, which has a plain-HTTP fallback), native share, Facebook / X / WhatsApp / Messenger (Messenger shows on phones only), QR, GIF preview, Download GIF and Download image (`?download=1`).
+- `<x-results.neighbours>`: previous / next / all sessions links. `<x-public.club-header :club-name :slug active>`: the public club header with Sessions and Leaderboard tabs.
+- Motion is CSS only (`resources/css/app.css`, `.rs-rise`, `.rs-drop`, `.rs-fade-up`, `.rs-confetti`). Elements are visible without animation, and `prefers-reduced-motion` turns it all off. Medal colours: amber (gold), zinc (silver), orange (bronze), always with a text label or rank number, never colour alone.
+- Public pages push Open Graph and Twitter tags through `@push('head')` (the public layout has `@stack('head')`).
+
+## 7. Stats tables (P11.6)
+
+- `<x-stats.table :rows :show-rank :min-games :caption>` is used for session standings and both leaderboards. Ranks 1–3 get medal badges (amber, zinc, orange, the same as the podium) and a soft tinted row, and tied ranks share the medal. Each player has an initials avatar with a fixed colour per name (`App\Support\StatsPresenter`), win % has a thin bar, point diff is a green / red / neutral pill, W is green and L is red. With `show-rank` false (the unranked list), pass `min-games` to show "6 / 10 games".
+- `<x-stats.match-log :matches :session-date :caption>`: court badge, score pill, the winning team bold with a "Won" marker (none for a tie, a missing score or a void match), and the losing side muted. Durations come from `StatsPresenter::duration()` ("1 h 5 min"). A match that finished on another day shows the date ("Oct 8 · 13:21").
+- On a phone (≤ 640 px) nothing scrolls sideways: standings fold Played/W/L into a "W–L · N played" line, and the match log becomes stacked cards.
+- `caption` is a small branding footer inside the card ("club · session · date · PickleQ+"), so a cropped screenshot still says where it's from. The results page sets it, and the leaderboards leave it off.

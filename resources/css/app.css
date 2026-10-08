@@ -105,3 +105,63 @@ summary:focus-visible {
     outline: 2px solid var(--color-accent-content);
     outline-offset: 2px;
 }
+
+/* ------------------------------------------------------------------
+ * Shareable results (Phase 11): podium entrance and confetti, CSS only.
+ * Elements are visible by default; animation only adds motion.
+ * ------------------------------------------------------------------ */
+@keyframes rs-rise {
+    from { transform: scaleY(0); }
+    to { transform: scaleY(1); }
+}
+
+@keyframes rs-drop {
+    from { opacity: 0; transform: translateY(-14px) scale(0.9); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes rs-fade-up {
+    from { opacity: 0; transform: translateY(14px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes rs-fall {
+    0% { opacity: 1; transform: translate3d(0, -20px, 0) rotate(0deg); }
+    100% { opacity: 0; transform: translate3d(var(--rs-sway, 0px), 420px, 0) rotate(var(--rs-spin, 540deg)); }
+}
+
+.rs-rise {
+    transform-origin: bottom;
+    animation: rs-rise 0.7s cubic-bezier(0.2, 0.9, 0.3, 1) var(--rs-delay, 0s) both;
+}
+
+.rs-drop {
+    animation: rs-drop 0.55s cubic-bezier(0.2, 1.2, 0.4, 1) var(--rs-delay, 0s) both;
+}
+
+.rs-fade-up {
+    animation: rs-fade-up 0.6s ease-out var(--rs-delay, 0s) both;
+}
+
+.rs-confetti {
+    position: absolute;
+    top: 0;
+    left: var(--rs-x, 50%);
+    width: 8px;
+    height: 14px;
+    border-radius: 2px;
+    opacity: 0;
+    animation: rs-fall 3.4s ease-in var(--rs-delay, 0s) 1 both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .rs-rise,
+    .rs-drop,
+    .rs-fade-up {
+        animation: none;
+    }
+
+    .rs-confetti {
+        display: none;
+    }
+}

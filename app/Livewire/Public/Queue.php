@@ -7,7 +7,8 @@ use App\Models\Club;
 use App\Models\PlaySession;
 use App\Services\CheckInQrService;
 use App\Services\PublicSessionView;
-use App\Services\StatsService;
+use App\Services\SessionResultsService;
+use App\Support\ResultsShareText;
 use Illuminate\Contracts\View\View;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Locked;
@@ -63,23 +64,45 @@ class Queue extends Component
     public function render(CheckInQrService $qr): View
     {
         $snapshot = $this->snapshot ?? $this->loadSnapshot();
-
-        $results = null;
-        if ($snapshot['status'] === 'ended') {
-            // P5.1b: final standings and match log when the club has public stats on (null otherwise).
-            $session = $this->resolveSession();
-            $results = app(StatsService::class)->publicEndedSession($session->club ?? abort(404), $session);
-        }
+        $session = $this->resolveSession();
 
         // This page's own URL only. Never the check-in or TV link.
-        $shareUrl = url('/c/'.$this->clubSlug.'/s/'.$this->resolveSession()->public_id);
+        $shareUrl = route('public.queue', [$this->clubSlug, $session->public_id]);
 
-        return view('livewire.public.queue', [
+        $data = [
             'shareUrl' => $shareUrl,
             'shareSvg' => $qr->svgForUrl($shareUrl, 320),
             'data' => $snapshot,
+            'results' => null,
+        ];
+
+        if ($snapshot['status'] !== 'ended') {
+            return view('livewire.public.queue', $data);
+        }
+
+        // P11.4: the shareable results design (cached public read model).
+        $club = $session->club ?? abort(404);
+        $results = app(SessionResultsService::class)->publicResults($club, $session) ?? abort(404);
+        $podium = $results['podium'];
+        $params = [$this->clubSlug, $session->public_id];
+        $neighbour = fn (?array $n): ?array => $n === null || $n['public_id'] === null ? null : [
+            'url' => route('public.queue', [$this->clubSlug, $n['public_id']]),
+            'name' => $n['name'],
+            'date' => $n['date'],
+        ];
+        $title = $session->name.' · '.$club->name.' '.__('results');
+
+        return view('livewire.public.queue', array_merge($data, [
             'results' => $results,
-        ]);
+            'club' => $club,
+            'podium' => $podium,
+            'previous' => $neighbour($results['previous']),
+            'next' => $neighbour($results['next']),
+            'gifUrl' => $podium === [] ? null : route('public.session.podium-gif', $params),
+            'pngUrl' => $podium === [] ? null : route('public.session.podium-png', $params),
+            'shareTitle' => $title,
+            'ogDescription' => $podium === [] ? __('Final results') : ResultsShareText::podiumLine($podium),
+        ]))->title($title);
     }
 
     /**

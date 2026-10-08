@@ -12,6 +12,7 @@ use App\Models\PlaySession;
 use App\Models\SessionPlayer;
 use App\Models\User;
 use App\Services\ClubService;
+use App\Services\SessionResultsService;
 use App\Services\StatsService;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
@@ -157,8 +158,8 @@ it('filters the leaderboard by period using the session date', function () {
         ->and($played(StatsPeriod::ThisYear))->toBe(3);
 });
 
-it('serves a cached public leaderboard with names as entered and public ids only', function () {
-    $club = statsClub(['public_stats' => true, 'leaderboard_min_games' => 1]);
+it('serves a cached, always-public leaderboard with names as entered and public ids only', function () {
+    $club = statsClub(['leaderboard_min_games' => 1]);
     $s = statsSession($club);
     $a = statsPlayer($club, 'Adrianne Basuel', ['dupr_id' => 'ABC123']);
     $b = statsPlayer($club, 'Rocky');
@@ -185,17 +186,6 @@ it('serves a cached public leaderboard with names as entered and public ids only
         ->and($service->publicLeaderboard($club, StatsPeriod::ThisYear)['ranked'][0]['played'])->toBe(2);
 });
 
-it('404s the public stats when public_stats is off', function () {
-    $club = statsClub(['public_stats' => false]);
-    $service = app(StatsService::class);
-
-    expect(fn () => $service->resolvePublicClub($club))->toThrow(NotFoundHttpException::class)
-        ->and(fn () => $service->publicLeaderboard($club))->toThrow(NotFoundHttpException::class);
-
-    $club->public_stats = true;
-    expect($service->resolvePublicClub($club)->is($club))->toBeTrue();
-});
-
 it('lists the match log in finish order and includes void matches only on request', function () {
     $club = statsClub();
     $s = statsSession($club);
@@ -220,8 +210,8 @@ it('lists the match log in finish order and includes void matches only on reques
         ->and(array_column($withVoid, 'void'))->toBe([false, false, true]);
 });
 
-it('exposes the public ended-session read only when ended and public_stats is on', function () {
-    $club = statsClub(['public_stats' => true]);
+it('exposes the public results read only when ended', function () {
+    $club = statsClub();
     $s = statsSession($club);
     $a = statsPlayer($club, 'Adrianne Basuel', ['dupr_id' => 'ABC123']);
     [$b, $c, $d] = array_map(fn ($n) => statsPlayer($club, $n.' Last'), ['Bo', 'Cy', 'Di']);
@@ -229,7 +219,7 @@ it('exposes the public ended-session read only when ended and public_stats is on
     statsMatch($s, [$a, $b], [$c, $d], 11, 1, MatchStatus::Void);
     $service = app(StatsService::class);
 
-    $data = $service->publicEndedSession($club, $s);
+    $data = app(SessionResultsService::class)->publicResults($club, $s);
 
     expect($data)->not->toBeNull();
     $json = (string) json_encode($data);
@@ -238,16 +228,15 @@ it('exposes the public ended-session read only when ended and public_stats is on
         ->and($data['matches'])->toHaveCount(1)
         ->and($data['matches'][0]['team_a'])->toBe(['Adrianne Basuel', 'Bo Last'])
         ->and($json)->not->toContain('ABC123')
-        ->and($data['standings'][0]['id'])->toBe($a->public_id);
+        ->and($data['standings'][0]['public_id'])->toBe($a->public_id);
 
     $live = statsSession($club, status: SessionStatus::Live);
-    $other = statsClub(['public_stats' => true]);
+    $other = statsClub();
 
-    expect($service->publicEndedSession($club, $live))->toBeNull()
-        ->and($service->publicEndedSession($other, $s))->toBeNull();
+    $results = app(SessionResultsService::class);
 
-    $club->public_stats = false;
-    expect($service->publicEndedSession($club, $s))->toBeNull();
+    expect($results->publicResults($club, $live))->toBeNull()
+        ->and($results->publicResults($other, $s))->toBeNull();
 });
 
 it('builds a player profile with record, partners and opponents', function () {
@@ -405,10 +394,10 @@ it('saves stats settings through the club service with validation', function () 
     $club = statsClub();
     $service = app(ClubService::class);
 
-    $service->updateStatsSettings($club, ['public_stats' => true, 'leaderboard_min_games' => '25']);
+    $service->updateStatsSettings($club, ['leaderboard_min_games' => '25']);
     $club->refresh();
 
-    expect($club->public_stats)->toBeTrue()->and($club->leaderboard_min_games)->toBe(25)
+    expect($club->leaderboard_min_games)->toBe(25)
         ->and(statsClub()->leaderboard_min_games)->toBe(10);
 
     foreach ([0, 101, 'x'] as $bad) {
@@ -417,8 +406,8 @@ it('saves stats settings through the club service with validation', function () 
 });
 
 it('never serves one club cached public rows to another club', function () {
-    $a = statsClub(['public_stats' => true, 'leaderboard_min_games' => 1]);
-    $b = statsClub(['public_stats' => true, 'leaderboard_min_games' => 1]);
+    $a = statsClub(['leaderboard_min_games' => 1]);
+    $b = statsClub(['leaderboard_min_games' => 1]);
     $sa = statsSession($a);
     $sb = statsSession($b);
     [$a1, $a2, $a3, $a4] = array_map(fn ($n) => statsPlayer($a, $n), ['Alpha One', 'Alpha Two', 'Alpha Three', 'Alpha Four']);
@@ -428,16 +417,14 @@ it('never serves one club cached public rows to another club', function () {
     $service = app(StatsService::class);
 
     $service->publicLeaderboard($a);
-    $service->publicEndedSession($a, $sa);
+    $results = app(SessionResultsService::class);
+    $results->publicResults($a, $sa);
     $boardB = (string) json_encode($service->publicLeaderboard($b));
-    $endedB = (string) json_encode($service->publicEndedSession($b, $sb));
+    $endedB = (string) json_encode($results->publicResults($b, $sb));
 
     expect($boardB)->toContain('Beta One')->not->toContain('Alpha')
         ->and($endedB)->toContain('Beta One')->not->toContain('Alpha')
-        ->and($service->publicEndedSession($b, $sa))->toBeNull();
-
-    $a->public_stats = false;
-    expect($service->publicEndedSession($a, $sa))->toBeNull();
+        ->and($results->publicResults($b, $sa))->toBeNull();
 });
 
 it('returns the name as entered on staff standings and leaderboard rows', function () {

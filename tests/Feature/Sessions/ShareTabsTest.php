@@ -71,10 +71,12 @@ it('shows a share button and the page QR on the public queue in every status', f
     // The QR must encode only the queue URL (not visible in the HTML text).
     $component->assertViewHas('shareSvg', app(CheckInQrService::class)->svgForUrl($queueUrl, 320));
 
-    expect($html)->toContain('data-test="share-queue-button"')
-        ->toContain('data-test="public-queue-qr"')
+    // An ended session shows the Phase 11 share panel (same link and QR) instead of the queue share button.
+    $ended = $status === SessionStatus::Ended;
+    expect($html)->toContain($ended ? 'data-test="share-panel"' : 'data-test="share-queue-button"')
+        ->toContain($ended ? 'data-test="results-share-qr"' : 'data-test="public-queue-qr"')
         ->toContain('<svg xmlns')
-        ->toContain('Scan to follow this queue')
+        ->toContain($ended ? 'Scan to open on a phone' : 'Scan to follow this queue')
         ->toContain(url('/c/'.$club->slug.'/s/'.$session->public_id))
         ->not->toContain((string) $session->tv_id)
         ->not->toContain('/checkin/');

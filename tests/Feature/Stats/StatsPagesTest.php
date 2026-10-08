@@ -149,14 +149,8 @@ test('staff leaderboard 404s for non-members', function () {
     $this->actingAs(User::factory()->create())->get(route('clubs.stats', $club))->assertNotFound();
 });
 
-test('public leaderboard 404s when public stats is off', function () {
-    [, , $club] = pagesClub();
-
-    $this->get(route('public.stats', $club))->assertNotFound();
-});
-
-test('public leaderboard shows names as entered, no DUPR ids and no links when on', function () {
-    [, , $club, $p] = pagesClub(['public_stats' => true]);
+test('public leaderboard is always public and shows names as entered, no DUPR ids and no links', function () {
+    [, , $club, $p] = pagesClub();
     $session = PlaySession::factory()->for($club)->create(['status' => SessionStatus::Ended, 'date' => '2026-10-10']);
     pagesMatch($session, $p);
 
@@ -223,41 +217,31 @@ test('roster rows link to the profile and the sidebar has a Stats link', functio
 
 // --- public ended page ---
 
-test('public ended page shows standings only when public stats is on', function () {
-    foreach ([true, false] as $on) {
-        [, , $club, $p] = pagesClub(['public_stats' => $on]);
-        $session = PlaySession::factory()->for($club)->create(['status' => SessionStatus::Ended, 'date' => '2026-10-10']);
-        pagesMatch($session, $p);
-        pagesMatch($session, $p, 2, 11, MatchStatus::Void);
+test('public ended page always shows standings and the done-only match log', function () {
+    [, , $club, $p] = pagesClub();
+    $session = PlaySession::factory()->for($club)->create(['status' => SessionStatus::Ended, 'date' => '2026-10-10']);
+    pagesMatch($session, $p);
+    pagesMatch($session, $p, 2, 11, MatchStatus::Void);
 
-        $test = Livewire::test(Queue::class, ['club' => $club, 'publicId' => $session->public_id])
-            ->assertSee('Session ended');
-
-        if ($on) {
-            $test->assertSee('Final standings')->assertSee('Bob Smith')->assertSee('Jane Doe')
-                ->assertDontSee('void')
-                ->assertSeeHtml('data-test="public-match-log"');
-        } else {
-            $test->assertDontSee('Final standings')->assertDontSee('Bob Smith');
-        }
-    }
+    Livewire::test(Queue::class, ['club' => $club, 'publicId' => $session->public_id])
+        ->assertSee('Session ended')
+        ->assertSee('Final standings')->assertSee('Bob Smith')->assertSee('Jane Doe')
+        ->assertDontSee('void')
+        ->assertSeeHtml('data-test="public-match-log"');
 });
 
 // --- settings ---
 
-test('owners save stats settings and see the public url', function () {
+test('owners save the leaderboard minimum and the settings page has no public stats switch', function () {
     [$owner, , $club] = pagesClub();
 
     Livewire::actingAs($owner)->test('pages::clubs.settings', ['club' => $club])
-        ->assertDontSee(route('public.stats', $club))
-        ->set('public_stats', true)
+        ->assertDontSeeHtml('data-test="public-stats"')
         ->set('leaderboard_min_games', '25')
         ->call('saveStatsSettings')
-        ->assertHasNoErrors()
-        ->assertSee(route('public.stats', $club));
+        ->assertHasNoErrors();
 
-    expect($club->fresh()->public_stats)->toBeTrue()
-        ->and($club->fresh()->leaderboard_min_games)->toBe(25);
+    expect($club->fresh()->leaderboard_min_games)->toBe(25);
 });
 
 test('stats settings validate the minimum games range', function () {
@@ -276,11 +260,11 @@ test('staff cannot open or save stats settings', function () {
 
     $this->actingAs($staff)->get(route('clubs.settings', $club))->assertForbidden();
     Livewire::actingAs($staff)->test('pages::clubs.settings', ['club' => $club])->assertForbidden();
-    expect($club->fresh()->public_stats)->toBeFalse();
+    expect($club->fresh()->leaderboard_min_games)->toBe(1);
 });
 
-test('a live session with public stats on shows no standings or match log', function () {
-    [, , $club, $p] = pagesClub(['public_stats' => true]);
+test('a live session shows no standings or match log', function () {
+    [, , $club, $p] = pagesClub();
     $session = PlaySession::factory()->for($club)->create(['status' => SessionStatus::Live, 'date' => '2026-10-15']);
     pagesMatch($session, $p);
 
@@ -292,20 +276,11 @@ test('a live session with public stats on shows no standings or match log', func
 });
 
 test('the ended public page does not poll', function () {
-    [, , $club, $p] = pagesClub(['public_stats' => true]);
+    [, , $club, $p] = pagesClub();
     $session = PlaySession::factory()->for($club)->create(['status' => SessionStatus::Ended, 'date' => '2026-10-10']);
     pagesMatch($session, $p);
 
     Livewire::test(Queue::class, ['club' => $club, 'publicId' => $session->public_id])
         ->assertSee('Final standings')
         ->assertDontSeeHtml('wire:poll');
-});
-
-test('the public leaderboard 404s on the next update when public stats is switched off', function () {
-    [, , $club] = pagesClub(['public_stats' => true]);
-
-    $component = Livewire::test(PublicLeaderboard::class, ['club' => $club])->assertOk();
-    $club->forceFill(['public_stats' => false])->save();
-
-    $component->set('period', 'this_year')->assertNotFound();
 });

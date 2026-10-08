@@ -17,7 +17,7 @@
                 <h2 class="text-lg font-bold tracking-tight text-zinc-900 dark:text-white">{{ __('Not ranked yet') }}</h2>
                 <p class="text-sm text-zinc-600 dark:text-zinc-400">{{ __('Fewer than :count games in this period.', ['count' => $minGames]) }}</p>
             </div>
-            <x-stats.table :rows="$unranked" :show-rank="false" />
+            <x-stats.table :rows="$unranked" :show-rank="false" :min-games="$minGames" />
         </div>
     @endif
 </section>

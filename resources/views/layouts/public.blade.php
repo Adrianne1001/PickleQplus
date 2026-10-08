@@ -8,6 +8,7 @@
         <title>{{ filled($title ?? null) ? $title.' - '.config('app.name', 'PickleQ+') : config('app.name', 'PickleQ+') }}</title>
         <link rel="icon" href="/favicon.ico" sizes="any">
         <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+        @stack('head')
         @fonts
         @vite(['resources/css/app.css', 'resources/js/app.js'])
         {{-- The forced-dark TV page skips the theme script; every other public page follows the shared choice (light by default). --}}

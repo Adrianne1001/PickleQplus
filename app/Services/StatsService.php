@@ -24,13 +24,11 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
  * Read-only stats (Phase 5). Only done matches with both scores set count; the
  * source of truth is matches/match_players. Staff methods return full names and
  * numeric ids; the public* methods return only public display names and
- * players.public_id (see PublicLeaderboardRow / PublicSessionResults).
+ * players.public_id (see PublicLeaderboard).
  *
  * @phpstan-type PublicRow array{rank: int|null, id: string, name: string, played: int, wins: int, losses: int, win_pct: int, point_diff: int}
  * @phpstan-type PublicLeaderboard array{period: string, min_games: int, ranked: list<PublicRow>, unranked: list<PublicRow>}
  * @phpstan-type LogRow array{id: int, court: int|null, status: string, void: bool, finished_at: Carbon|null, duration_minutes: int|null, team_a: list<string>, team_b: list<string>, score_a: int|null, score_b: int|null}
- * @phpstan-type PublicLogRow array{court: int|null, finished_at: Carbon|null, duration_minutes: int|null, team_a: list<string>, team_b: list<string>, score_a: int|null, score_b: int|null}
- * @phpstan-type PublicSessionResults array{standings: list<PublicRow>, matches: list<PublicLogRow>}
  * @phpstan-type ProfileRecord array{played: int, wins: int, losses: int, win_pct: int|null, points_for: int, points_against: int, point_diff: int, sessions_attended: int, last_played: Carbon|null}
  * @phpstan-type PartnerRow array{player_id: int, name: string, games: int, wins: int, win_pct: int}
  * @phpstan-type OpponentRow array{player_id: int, name: string, games: int, wins: int, losses: int}
@@ -88,18 +86,6 @@ class StatsService
     // ------------------------------------------------------------------- public
 
     /**
-     * Resolver for /c/{club:slug}/stats: 404 unless the club has public stats on.
-     */
-    public function resolvePublicClub(Club $club): Club
-    {
-        if (! $club->public_stats) {
-            throw new NotFoundHttpException;
-        }
-
-        return $club;
-    }
-
-    /**
      * Cached (60 s per club and period) public leaderboard. Contains only
      * public display names and players.public_id, never full names, DUPR IDs or
      * numeric ids.
@@ -108,8 +94,6 @@ class StatsService
      */
     public function publicLeaderboard(Club $club, StatsPeriod $period = StatsPeriod::AllTime): array
     {
-        $this->resolvePublicClub($club);
-
         /** @var PublicLeaderboard $data */
         $data = Cache::remember(
             "public-stats:{$club->id}:{$period->value}",
@@ -131,52 +115,6 @@ class StatsService
         );
 
         return $data;
-    }
-
-    /**
-     * Final standings and done-only match log of an ended session, for the
-     * public page. Null unless the session belongs to the club, is ended, and
-     * the club has public stats on. Public names and public ids only.
-     *
-     * @return PublicSessionResults|null
-     */
-    public function publicEndedSession(Club $club, PlaySession $session): ?array
-    {
-        if (! $club->public_stats || $session->club_id !== $club->id || $session->status !== SessionStatus::Ended) {
-            return null;
-        }
-
-        /** @var PublicSessionResults $data */
-        $data = Cache::remember("public-session-stats:{$session->id}", self::PUBLIC_CACHE_SECONDS, fn (): array => $this->buildPublicEndedSession($session));
-
-        return $data;
-    }
-
-    /**
-     * @return PublicSessionResults
-     */
-    private function buildPublicEndedSession(PlaySession $session): array
-    {
-        $standings = $this->sessionStandings($session);
-        $matchPlayers = $this->matchPlayerNames($session, includeVoid: false);
-
-        $log = [];
-        foreach ($this->logRows($session, false, $matchPlayers) as $row) {
-            $log[] = [
-                'court' => $row['court'],
-                'finished_at' => $row['finished_at'],
-                'duration_minutes' => $row['duration_minutes'],
-                'team_a' => $row['team_a'],
-                'team_b' => $row['team_b'],
-                'score_a' => $row['score_a'],
-                'score_b' => $row['score_b'],
-            ];
-        }
-
-        return [
-            'standings' => $this->publicRows($standings, $this->publicPlayers(array_map(fn (RankedRow $r): int => (int) $r->row->id, $standings))),
-            'matches' => $log,
-        ];
     }
 
     // ---------------------------------------------------------------- match log
@@ -542,7 +480,7 @@ class StatsService
      * @param  list<int>  $ids
      * @return array<int, array{public_id: string, name: string}>
      */
-    private function publicPlayers(array $ids): array
+    public function publicPlayers(array $ids): array
     {
         $map = [];
         foreach (array_chunk(array_values(array_unique($ids)), 500) as $chunk) {
@@ -559,7 +497,7 @@ class StatsService
      * @param  array<int, array{public_id: string, name: string}>  $players
      * @return list<PublicRow>
      */
-    private function publicRows(array $rows, array $players): array
+    public function publicRows(array $rows, array $players): array
     {
         $out = [];
         foreach ($rows as $r) {

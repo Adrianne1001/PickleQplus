@@ -21,12 +21,11 @@ use Illuminate\Support\Carbon;
  * @property int $default_courts
  * @property LateArrivalPolicy $late_arrival_policy
  * @property bool $allow_concurrent_sessions
- * @property bool $public_stats
  * @property int $leaderboard_min_games
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  */
-#[Fillable(['name', 'slug', 'dupr_club_id', 'star_bands', 'default_courts', 'late_arrival_policy', 'allow_concurrent_sessions', 'public_stats', 'leaderboard_min_games'])]
+#[Fillable(['name', 'slug', 'dupr_club_id', 'star_bands', 'default_courts', 'late_arrival_policy', 'allow_concurrent_sessions', 'leaderboard_min_games'])]
 class Club extends Model
 {
     /** @use HasFactory<ClubFactory> */
@@ -38,7 +37,6 @@ class Club extends Model
     protected $attributes = [
         'late_arrival_policy' => 'minimum',
         'allow_concurrent_sessions' => false,
-        'public_stats' => false,
         'leaderboard_min_games' => 10,
     ];
 
@@ -70,7 +68,6 @@ class Club extends Model
             'default_courts' => 'integer',
             'late_arrival_policy' => LateArrivalPolicy::class,
             'allow_concurrent_sessions' => 'boolean',
-            'public_stats' => 'boolean',
             'leaderboard_min_games' => 'integer',
         ];
     }

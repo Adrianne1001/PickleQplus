@@ -20,6 +20,49 @@
     $groupLabel = collect($groups)->pluck('label', 'index')->all();
 @endphp
 
+@if ($results !== null)
+    @push('head')
+        <meta property="og:type" content="website" />
+        <meta property="og:site_name" content="{{ config('app.name', 'PickleQ+') }}" />
+        <meta property="og:title" content="{{ $shareTitle }}" />
+        <meta property="og:description" content="{{ $ogDescription }}" />
+        <meta property="og:url" content="{{ $shareUrl }}" />
+        @if ($pngUrl)
+            <meta property="og:image" content="{{ $pngUrl }}" />
+            <meta property="og:image:type" content="image/png" />
+            <meta property="og:image:width" content="1080" />
+            <meta property="og:image:height" content="1080" />
+            <meta property="og:image:alt" content="{{ $ogDescription }}" />
+        @endif
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:title" content="{{ $shareTitle }}" />
+        <meta name="twitter:description" content="{{ $ogDescription }}" />
+        @if ($pngUrl)
+            <meta name="twitter:image" content="{{ $pngUrl }}" />
+        @endif
+    @endpush
+
+    <main class="mx-auto flex min-h-screen w-full max-w-3xl flex-col gap-5 px-4 pb-24 pt-5" data-test="queue-page">
+        <x-public.club-header :club-name="$club->name" :slug="$club->slug" active="sessions" />
+        <p class="sr-only">{{ __('Session ended. Thanks for playing!') }}</p>
+
+        <x-results.body :results="$results" :standings="$results['standings']">
+            @if ($previous || $next)
+                <x-slot:neighbours>
+                    <x-results.neighbours :previous="$previous" :next="$next" :all-url="route('public.sessions', $club->slug)" :all-label="__('All sessions')" />
+                </x-slot:neighbours>
+            @else
+                <x-slot:neighbours>
+                    <x-results.neighbours :all-url="route('public.sessions', $club->slug)" :all-label="__('All sessions')" />
+                </x-slot:neighbours>
+            @endif
+
+            <x-slot:share>
+                <x-results.share-panel :share-url="$shareUrl" :share-svg="$shareSvg" :title="$shareTitle" :text="$shareTitle.($podium === [] ? '' : ' '.$ogDescription)" :gif-url="$gifUrl" :png-url="$pngUrl" />
+            </x-slot:share>
+        </x-results.body>
+    </main>
+@else
 <main
     class="mx-auto flex min-h-screen w-full max-w-xl flex-col gap-6 px-4 pb-24 pt-5"
     x-data="queueMe(@js($publicId))"
@@ -76,18 +119,6 @@
         <p class="text-3xl font-extrabold tracking-tight" x-text="banner?.title"></p>
         <p class="mt-1 text-lg" x-text="banner?.body"></p>
     </div>
-
-    @if ($results !== null)
-        <section aria-labelledby="standings-h" data-test="public-standings">
-            <h2 id="standings-h" class="mb-3 text-lg font-bold">{{ __('Final standings') }}</h2>
-            <x-stats.table :rows="$results['standings']" />
-        </section>
-
-        <section aria-labelledby="log-h" data-test="public-match-log">
-            <h2 id="log-h" class="mb-3 text-lg font-bold">{{ __('Matches') }}</h2>
-            <x-stats.match-log :matches="$results['matches']" />
-        </section>
-    @endif
 
     @if ($live)
         {{-- Me card: the hero of the page --}}
@@ -214,3 +245,4 @@
         </section>
     @endif
 </main>
+@endif
