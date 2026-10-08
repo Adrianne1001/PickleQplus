@@ -49,10 +49,10 @@ test('the player form validation rejects an invalid gender', function () {
     $club = Club::factory()->create();
     $input = new PlayerInput;
 
-    expect($input->validate($club, null, 'Ana', '', '', 'manual', '3', null, 'woman')['gender'])->toBe('woman')
-        ->and($input->validate($club, null, 'Ana', '', '', 'manual', '3', null, '')['gender'])->toBeNull()
+    expect($input->validate($club, null, 'Ana', '', '', 'manual', '3', 'woman')['gender'])->toBe('woman')
+        ->and($input->validate($club, null, 'Ana', '', '', 'manual', '3', '')['gender'])->toBeNull()
         ->and($input->validate($club, null, 'Ana', '', '', 'manual', '3'))->not->toHaveKey('gender');
-    expect(fn () => $input->validate($club, null, 'Ana', '', '', 'manual', '3', null, 'robot'))->toThrow(ValidationException::class);
+    expect(fn () => $input->validate($club, null, 'Ana', '', '', 'manual', '3', 'robot'))->toThrow(ValidationException::class);
 });
 
 test('roster import parses the gender column and exposes it in the preview', function () {
@@ -125,15 +125,15 @@ test('self-register stores an optional gender and rejects an invalid one', funct
     $session = PlaySession::factory()->live()->for(Club::factory()->create())->create();
     $svc = app(SelfCheckInService::class);
 
-    $svc->register($session, (string) $session->checkin_token, 'Ana One', 'Anna', null, 3, 'gx', 'W');
-    $svc->register($session, (string) $session->checkin_token, 'Bo Two', 'Bobo', null, 3, 'gx');
+    $svc->register($session, (string) $session->checkin_token, 'Anna', null, 3, 'gx', 'W');
+    $svc->register($session, (string) $session->checkin_token, 'Bobo', null, 3, 'gx');
 
-    expect(Player::query()->where('nickname', 'Anna')->first()->gender)->toBe(Gender::Woman)
-        ->and(Player::query()->where('nickname', 'Bobo')->first()->gender)->toBeNull();
+    expect(Player::query()->where('name', 'Anna')->first()->gender)->toBe(Gender::Woman)
+        ->and(Player::query()->where('name', 'Bobo')->first()->gender)->toBeNull();
 
-    expect(fn () => $svc->register($session, (string) $session->checkin_token, 'Cy Three', 'Cyc', null, 3, 'gx', 'robot'))
+    expect(fn () => $svc->register($session, (string) $session->checkin_token, 'Cyc', null, 3, 'gx', 'robot'))
         ->toThrow(ValidationException::class);
-    expect(Player::query()->where('nickname', 'Cyc')->exists())->toBeFalse();
+    expect(Player::query()->where('name', 'Cyc')->exists())->toBeFalse();
 });
 
 test('self check-in sets a missing gender but never overwrites an existing one', function () {
@@ -143,24 +143,24 @@ test('self check-in sets a missing gender but never overwrites an existing one',
     $has = Player::factory()->for($session->club)->manual(3)->create(['gender' => Gender::Man]);
     $svc = app(SelfCheckInService::class);
 
-    $svc->checkIn($session, $token, (string) $none->public_id, null, 'gx', 'female');
-    $svc->checkIn($session, $token, (string) $has->public_id, null, 'gx', 'woman');
+    $svc->checkIn($session, $token, (string) $none->public_id, 'gx', 'female');
+    $svc->checkIn($session, $token, (string) $has->public_id, 'gx', 'woman');
 
     expect($none->fresh()->gender)->toBe(Gender::Woman)
         ->and($has->fresh()->gender)->toBe(Gender::Man);
 
     // Already checked in: still no overwrite.
-    $svc->checkIn($session, $token, (string) $none->public_id, null, 'gx', 'man');
+    $svc->checkIn($session, $token, (string) $none->public_id, 'gx', 'man');
     expect($none->fresh()->gender)->toBe(Gender::Woman);
 
-    expect(fn () => $svc->checkIn($session, $token, (string) $has->public_id, null, 'gx', 'robot'))->toThrow(ValidationException::class);
+    expect(fn () => $svc->checkIn($session, $token, (string) $has->public_id, 'gx', 'robot'))->toThrow(ValidationException::class);
 });
 
 test('self check-in with a stale token never touches the gender', function () {
     $session = PlaySession::factory()->live()->for(Club::factory()->create())->create();
     $player = Player::factory()->for($session->club)->manual(3)->create();
 
-    expect(fn () => app(SelfCheckInService::class)->checkIn($session, 'wrong-token', (string) $player->public_id, null, 'gx', 'man'))
+    expect(fn () => app(SelfCheckInService::class)->checkIn($session, 'wrong-token', (string) $player->public_id, 'gx', 'man'))
         ->toThrow(ValidationException::class);
     expect($player->fresh()->gender)->toBeNull();
 });
@@ -169,7 +169,7 @@ test('self check-in cannot set the gender of a player from another club', functi
     $session = PlaySession::factory()->live()->for(Club::factory()->create())->create();
     $other = Player::factory()->for(Club::factory()->create())->manual(3)->create();
 
-    expect(fn () => app(SelfCheckInService::class)->checkIn($session, (string) $session->checkin_token, (string) $other->public_id, null, 'gx', 'man'))
+    expect(fn () => app(SelfCheckInService::class)->checkIn($session, (string) $session->checkin_token, (string) $other->public_id, 'gx', 'man'))
         ->toThrow(ValidationException::class);
     expect($other->fresh()->gender)->toBeNull();
 });

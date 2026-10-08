@@ -12,9 +12,6 @@
         data-test="player-name"
     >
         <div class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-zinc-600 dark:text-zinc-400">
-            @if ($player->nickname)
-                <span class="font-medium">"{{ $player->nickname }}"</span>
-            @endif
             @if ($player->gender)
                 <flux:badge size="sm" color="zinc" data-test="player-gender">{{ $player->gender->label() }}</flux:badge>
             @endif

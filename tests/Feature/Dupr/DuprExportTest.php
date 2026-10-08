@@ -297,14 +297,14 @@ test('a missing file is a 404', function () {
     $this->actingAs($user)->get(duprUrl($club, $session, $export))->assertNotFound();
 });
 
-test('the exported line maps A1 A2 B1 B2 by team and slot with full names and uppercase ids', function () {
+test('the exported line maps A1 A2 B1 B2 by team and slot with names as entered and uppercase ids', function () {
     Storage::fake('local');
     [$user, $club, $session] = duprSetup();
-    $mk = fn (string $name, string $nick, string $id) => Player::factory()->for($club)->create(['name' => $name, 'nickname' => $nick, 'dupr_id' => $id]);
-    $a1 = $mk('Ann Alpha', 'Annie', 'aaa111');
-    $a2 = $mk('Bob Beta', 'Bobby', 'bbb222');
-    $b1 = $mk('Cy Gamma', 'Cyc', 'ccc333');
-    $b2 = $mk('Di Delta', 'Dee', 'ddd444');
+    $mk = fn (string $name, string $id) => Player::factory()->for($club)->create(['name' => $name, 'dupr_id' => $id]);
+    $a1 = $mk('Ann Alpha', 'aaa111');
+    $a2 = $mk('Ace', 'bbb222');
+    $b1 = $mk('Cy Gamma', 'ccc333');
+    $b2 = $mk('Di Delta', 'ddd444');
     $match = GameMatch::factory()->for($session)->create([
         'status' => MatchStatus::Done, 'team_a_score' => 9, 'team_b_score' => 11, 'finished_at' => now(),
     ]);
@@ -316,7 +316,7 @@ test('the exported line maps A1 A2 B1 B2 by team and slot with full names and up
     $export = app(DuprExportService::class)->export($session, $user);
 
     $lines = explode("\n", Storage::disk('local')->get($export->file_path));
-    expect($lines[1])->toBe('D,Night,2026-09-29,Ann Alpha,AAA111,,Bob Beta,BBB222,,Cy Gamma,CCC333,,Di Delta,DDD444,,Pickle Club,SIDEOUT,9,11,,,,,,,,');
+    expect($lines[1])->toBe('D,Night,2026-09-29,Ann Alpha,AAA111,,Ace,BBB222,,Cy Gamma,CCC333,,Di Delta,DDD444,,Pickle Club,SIDEOUT,9,11,,,,,,,,');
 });
 
 test('deleting a club removes its DUPR export files', function () {

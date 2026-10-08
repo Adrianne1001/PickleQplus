@@ -71,7 +71,7 @@ test('self check-in on the already-checked-in path sets a gender and refills a m
     [$session, $players] = mixedBoard('MMWN');
     expect(stagedOf($session))->toHaveCount(0);
 
-    $result = app(SelfCheckInService::class)->checkIn($session, (string) $session->checkin_token, $players[3]->public_id, null, '1.1.1.1', 'woman');
+    $result = app(SelfCheckInService::class)->checkIn($session, (string) $session->checkin_token, $players[3]->public_id, '1.1.1.1', 'woman');
 
     expect($result['result'])->toBe('already_checked_in')
         ->and(stagedOf($session))->toHaveCount(1);

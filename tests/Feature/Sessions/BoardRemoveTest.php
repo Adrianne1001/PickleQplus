@@ -55,16 +55,16 @@ test('non-staff cannot remove', function () {
     Livewire::actingAs(User::factory()->create())->test(CheckInPanel::class, ['session' => $session])->assertNotFound();
 });
 
-test('the new badge marks players self-registered in this session, and nicknames show', function () {
+test('the new badge marks players self-registered in this session', function () {
     [$owner, $club, $session] = removeBoard();
-    $new = Player::factory()->for($club)->create(['name' => 'Newbie Nora', 'nickname' => 'Nor']);
+    $new = Player::factory()->for($club)->create(['name' => 'Newbie Nora']);
     $new->forceFill(['self_registered_at' => now(), 'self_registered_session_id' => $session->id])->save();
-    $old = Player::factory()->for($club)->create(['name' => 'Regular Rick', 'nickname' => 'Rick']);
+    $old = Player::factory()->for($club)->create(['name' => 'Regular Rick']);
     app(CheckInService::class)->checkIn($session, $new);
     app(CheckInService::class)->checkIn($session, $old);
 
     $html = Livewire::actingAs($owner)->test(CheckInPanel::class, ['session' => $session])
-        ->assertSee('Newbie Nora')->assertSee('Regular Rick')->assertSee('Rick')
+        ->assertSee('Newbie Nora')->assertSee('Regular Rick')
         ->html();
 
     expect(substr_count($html, 'data-test="new-badge"'))->toBe(1);

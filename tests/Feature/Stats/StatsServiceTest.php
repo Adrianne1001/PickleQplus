@@ -157,11 +157,11 @@ it('filters the leaderboard by period using the session date', function () {
         ->and($played(StatsPeriod::ThisYear))->toBe(3);
 });
 
-it('serves a cached public leaderboard with public names and public ids only', function () {
+it('serves a cached public leaderboard with names as entered and public ids only', function () {
     $club = statsClub(['public_stats' => true, 'leaderboard_min_games' => 1]);
     $s = statsSession($club);
-    $a = statsPlayer($club, 'Adrianne Basuel', ['dupr_id' => 'ABC123', 'nickname' => null]);
-    $b = statsPlayer($club, 'Bob Stone', ['nickname' => 'Rocky']);
+    $a = statsPlayer($club, 'Adrianne Basuel', ['dupr_id' => 'ABC123']);
+    $b = statsPlayer($club, 'Rocky');
     $c = statsPlayer($club, 'Cy Young', ['dupr_id' => 'ZZZ999']);
     $d = statsPlayer($club, 'Di Prince');
     statsMatch($s, [$a, $b], [$c, $d]);
@@ -171,8 +171,8 @@ it('serves a cached public leaderboard with public names and public ids only', f
     $json = (string) json_encode($data);
 
     expect($data['ranked'])->toHaveCount(4)
-        ->and($json)->toContain('Adrianne B.')->toContain('Rocky')->toContain((string) $a->public_id)
-        ->and($json)->not->toContain('Basuel')->not->toContain('Stone')->not->toContain('ABC123')->not->toContain('ZZZ999')
+        ->and($json)->toContain('Adrianne Basuel')->toContain('Rocky')->toContain((string) $a->public_id)
+        ->and($json)->not->toContain('ABC123')->not->toContain('ZZZ999')
         ->and(array_keys($data['ranked'][0]))->toBe(['rank', 'id', 'name', 'played', 'wins', 'losses', 'win_pct', 'point_diff']);
 
     foreach ($data['ranked'] as $row) {
@@ -236,8 +236,8 @@ it('exposes the public ended-session read only when ended and public_stats is on
 
     expect($data['standings'])->toHaveCount(4)
         ->and($data['matches'])->toHaveCount(1)
-        ->and($data['matches'][0]['team_a'])->toBe(['Adrianne B.', 'Bo L.'])
-        ->and($json)->not->toContain('Basuel')->not->toContain('ABC123')
+        ->and($data['matches'][0]['team_a'])->toBe(['Adrianne Basuel', 'Bo Last'])
+        ->and($json)->not->toContain('ABC123')
         ->and($data['standings'][0]['id'])->toBe($a->public_id);
 
     $live = statsSession($club, status: SessionStatus::Live);
@@ -432,22 +432,22 @@ it('never serves one club cached public rows to another club', function () {
     $boardB = (string) json_encode($service->publicLeaderboard($b));
     $endedB = (string) json_encode($service->publicEndedSession($b, $sb));
 
-    expect($boardB)->toContain('Beta O.')->not->toContain('Alpha')
-        ->and($endedB)->toContain('Beta O.')->not->toContain('Alpha')
+    expect($boardB)->toContain('Beta One')->not->toContain('Alpha')
+        ->and($endedB)->toContain('Beta One')->not->toContain('Alpha')
         ->and($service->publicEndedSession($b, $sa))->toBeNull();
 
     $a->public_stats = false;
     expect($service->publicEndedSession($a, $sa))->toBeNull();
 });
 
-it('carries the nickname on staff standings and leaderboard rows', function () {
+it('returns the name as entered on staff standings and leaderboard rows', function () {
     $club = statsClub(['leaderboard_min_games' => 1]);
     $s = statsSession($club);
-    [$a, $b, $c, $d] = [statsPlayer($club, 'Ann Lee', ['nickname' => 'Annie']), statsPlayer($club, 'Bob'), statsPlayer($club, 'Cy'), statsPlayer($club, 'Di')];
+    [$a, $b, $c, $d] = [statsPlayer($club, 'Annie'), statsPlayer($club, 'Bob Stone'), statsPlayer($club, 'Cy'), statsPlayer($club, 'Di')];
     statsMatch($s, [$a, $b], [$c, $d]);
     $service = app(StatsService::class);
 
-    expect($service->sessionStandings($s)[0]->row->nickname)->toBe('Annie')
-        ->and($service->leaderboard($club)['ranked'][0]->row->nickname)->toBe('Annie')
-        ->and($service->leaderboard($club)['ranked'][2]->row->nickname)->toBeNull();
+    expect($service->sessionStandings($s)[0]->row->name)->toBe('Annie')
+        ->and($service->leaderboard($club)['ranked'][0]->row->name)->toBe('Annie')
+        ->and($service->leaderboard($club)['ranked'][1]->row->name)->toBe('Bob Stone');
 });

@@ -65,18 +65,7 @@
                         <div class="space-y-4 rounded-2xl border-2 border-brand-600 bg-white p-5 shadow-xs dark:border-brand-400 dark:bg-zinc-900" data-test="checkin-confirm">
                             <p class="text-xl font-semibold">
                                 {{ __('Check in as :name?', ['name' => $selected['name']]) }}
-                                @if ($selected['nickname'])
-                                    <span class="font-normal text-zinc-600 dark:text-zinc-400">"{{ $selected['nickname'] }}"</span>
-                                @endif
                             </p>
-                            @if ($selected['nickname'] === null)
-                                <div>
-                                    <label for="nickname" class="block font-medium">{{ __('Nickname (optional)') }}</label>
-                                    <input id="nickname" type="text" wire:model="nickname" maxlength="20" autocomplete="off" class="{{ $input }}" data-test="checkin-nickname" />
-                                    <p class="mt-1 text-sm text-zinc-600 dark:text-zinc-400">{{ __('Shown on the public queue and TV instead of your full name.') }}</p>
-                                    @error('nickname') <p class="{{ $errorText }}" data-test="error-nickname">{{ $message }}</p> @enderror
-                                </div>
-                            @endif
                             @if ($needsGender)
                                 <fieldset data-test="checkin-gender">
                                     <legend class="block font-medium">{{ __('Gender (optional)') }}</legend>
@@ -103,9 +92,6 @@
                                     <button type="button" wire:click="select(@js($row['id']))" class="flex min-h-16 w-full items-center justify-between gap-3 px-4 py-4 text-start text-lg hover:bg-zinc-50 focus-visible:bg-zinc-50 dark:hover:bg-zinc-800 dark:focus-visible:bg-zinc-800" data-test="checkin-result">
                                         <span class="font-medium">
                                             {{ $row['name'] }}
-                                            @if ($row['nickname'])
-                                                <span class="font-normal text-zinc-600 dark:text-zinc-400">"{{ $row['nickname'] }}"</span>
-                                            @endif
                                         </span>
                                         @if ($row['status'])
                                             <span class="shrink-0 rounded-full bg-brand-50 px-3 py-1 text-sm font-semibold text-brand-800 dark:bg-brand-950 dark:text-brand-300" data-test="result-status">
@@ -132,15 +118,10 @@
                     @enderror
 
                     <div>
-                        <label for="regName" class="block font-medium">{{ __('Full name') }}</label>
+                        <label for="regName" class="block font-medium">{{ __('Name') }}</label>
                         <input id="regName" type="text" wire:model="regName" maxlength="120" required autocomplete="off" class="{{ $input }}" />
+                        <p class="mt-1 text-sm text-zinc-600 dark:text-zinc-400">{{ __('The name everyone will see on the queue: your name or a nickname.') }}</p>
                         @error('name') <p class="{{ $errorText }}" data-test="error-name">{{ $message }}</p> @enderror
-                    </div>
-                    <div>
-                        <label for="regNickname" class="block font-medium">{{ __('Nickname') }}</label>
-                        <input id="regNickname" type="text" wire:model="regNickname" maxlength="20" required autocomplete="off" class="{{ $input }}" />
-                        <p class="mt-1 text-sm text-zinc-600 dark:text-zinc-400">{{ __('Shown on the public queue and TV instead of your full name.') }}</p>
-                        @error('nickname') <p class="{{ $errorText }}" data-test="error-nickname">{{ $message }}</p> @enderror
                     </div>
                     <div>
                         <label for="regDuprId" class="block font-medium">{{ __('DUPR ID (optional)') }}</label>

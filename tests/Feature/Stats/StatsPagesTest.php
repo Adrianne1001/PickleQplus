@@ -27,10 +27,10 @@ function pagesClub(array $clubAttrs = []): array
     $staff = User::factory()->create();
     $club = Club::factory()->withOwner($owner)->withStaff($staff)->create($clubAttrs + ['leaderboard_min_games' => 1]);
     $players = [
-        Player::factory()->for($club)->create(['name' => 'Jane Doe', 'nickname' => null, 'dupr_id' => 'DUPR12345']),
-        Player::factory()->for($club)->create(['name' => 'Bob Smith', 'nickname' => 'Bobby']),
-        Player::factory()->for($club)->create(['name' => 'Carl Jones', 'nickname' => null]),
-        Player::factory()->for($club)->create(['name' => 'Dina Lee', 'nickname' => null]),
+        Player::factory()->for($club)->create(['name' => 'Jane Doe', 'dupr_id' => 'DUPR12345']),
+        Player::factory()->for($club)->create(['name' => 'Bob Smith']),
+        Player::factory()->for($club)->create(['name' => 'Carl Jones']),
+        Player::factory()->for($club)->create(['name' => 'Dina Lee']),
     ];
 
     return [$owner, $staff, $club, $players];
@@ -75,7 +75,7 @@ test('results page shows standings and a match log with void rows', function () 
             ->assertOk()
             ->assertSee('Standings so far')
             ->assertSee('Jane Doe')
-            ->assertSee('Bobby')
+            ->assertSee('Bob Smith')
             ->assertSee(route('clubs.players.show', [$club, $p[0]]), false);
     }
 
@@ -155,20 +155,19 @@ test('public leaderboard 404s when public stats is off', function () {
     $this->get(route('public.stats', $club))->assertNotFound();
 });
 
-test('public leaderboard shows display names only and no links when on', function () {
+test('public leaderboard shows names as entered, no DUPR ids and no links when on', function () {
     [, , $club, $p] = pagesClub(['public_stats' => true]);
     $session = PlaySession::factory()->for($club)->create(['status' => SessionStatus::Ended, 'date' => '2026-10-10']);
     pagesMatch($session, $p);
 
-    $response = $this->get(route('public.stats', $club))->assertOk()->assertSee('Bobby')->assertSee('Jane D');
-    $response->assertDontSee('Jane Doe')->assertDontSee('Bob Smith')->assertDontSee('DUPR12345')
+    $response = $this->get(route('public.stats', $club))->assertOk()->assertSee('Bob Smith')->assertSee('Jane Doe');
+    $response->assertDontSee('DUPR12345')
         ->assertDontSee('/clubs/'.$club->slug.'/players', false);
 
     Livewire::test(PublicLeaderboard::class, ['club' => $club])
-        ->assertSee('Jane D')
+        ->assertSee('Jane Doe')
         ->set('period', 'this_year')
-        ->assertSee('Jane D')
-        ->assertDontSee('Jane Doe');
+        ->assertSee('Jane Doe');
 });
 
 // --- profile ---
@@ -235,11 +234,11 @@ test('public ended page shows standings only when public stats is on', function 
             ->assertSee('Session ended');
 
         if ($on) {
-            $test->assertSee('Final standings')->assertSee('Bobby')->assertSee('Jane D')
-                ->assertDontSee('Jane Doe')->assertDontSee('Bob Smith')->assertDontSee('void')
+            $test->assertSee('Final standings')->assertSee('Bob Smith')->assertSee('Jane Doe')
+                ->assertDontSee('void')
                 ->assertSeeHtml('data-test="public-match-log"');
         } else {
-            $test->assertDontSee('Final standings')->assertDontSee('Bobby');
+            $test->assertDontSee('Final standings')->assertDontSee('Bob Smith');
         }
     }
 });

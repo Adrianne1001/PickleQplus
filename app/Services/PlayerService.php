@@ -21,7 +21,7 @@ use Throwable;
 class PlayerService
 {
     /**
-     * @param  array{name: string, nickname?: string|null, gender?: Gender|string|null, dupr_id?: string|null, dupr_rating?: float|int|string|null, rating_source?: RatingSource|string|null, stars?: int|null}  $data
+     * @param  array{name: string, gender?: Gender|string|null, dupr_id?: string|null, dupr_rating?: float|int|string|null, rating_source?: RatingSource|string|null, stars?: int|null}  $data
      */
     public function create(Club $club, array $data): Player
     {
@@ -34,7 +34,7 @@ class PlayerService
     /**
      * Partial update: only keys present in $data change.
      *
-     * @param  array{name?: string, nickname?: string|null, gender?: Gender|string|null, dupr_id?: string|null, dupr_rating?: float|int|string|null, rating_source?: RatingSource|string|null, stars?: int|null}  $data
+     * @param  array{name?: string, gender?: Gender|string|null, dupr_id?: string|null, dupr_rating?: float|int|string|null, rating_source?: RatingSource|string|null, stars?: int|null}  $data
      */
     public function update(Player $player, array $data): Player
     {
@@ -90,11 +90,11 @@ class PlayerService
                 return $this->save($player, $fresh, $data);
             });
         } catch (UniqueConstraintViolationException $e) {
-            $key = preg_match('/players.nickname|nickname_unique/', $e->getMessage()) === 1 ? 'nickname' : 'dupr_id';
+            $key = preg_match('/players\.name|players_club_id_name_unique/', $e->getMessage()) === 1 ? 'name' : 'dupr_id';
 
             throw ValidationException::withMessages([
-                $key => $key === 'nickname'
-                    ? 'That nickname is already taken in this club.'
+                $key => $key === 'name'
+                    ? 'A player with that name is already on the roster.'
                     : 'Another player in this club already has this DUPR ID.',
             ]);
         }
@@ -147,17 +147,14 @@ class PlayerService
             }
         }
 
-        $nickname = $player->nickname;
-        if (array_key_exists('nickname', $data)) {
-            $nickname = Player::normalizeNickname($data['nickname']);
-            if ($nickname !== null) {
-                if (mb_strlen($nickname) > 20) {
-                    throw ValidationException::withMessages(['nickname' => 'The nickname may not be longer than 20 characters.']);
-                }
-                if (Player::nicknameTaken($club->id, $nickname, $player->exists ? $player->id : null)) {
-                    throw ValidationException::withMessages(['nickname' => 'That nickname is already taken in this club.']);
-                }
-            }
+        if ($name === '') {
+            throw ValidationException::withMessages(['name' => 'A name is required.']);
+        }
+        if (mb_strlen($name) > 120) {
+            throw ValidationException::withMessages(['name' => 'The name may not be longer than 120 characters.']);
+        }
+        if (Player::nameTaken($club->id, $name, $exists ? $player->id : null)) {
+            throw ValidationException::withMessages(['name' => 'A player with that name is already on the roster.']);
         }
 
         // A key that is present sets the gender (null or blank clears it); an absent key keeps it.
@@ -172,7 +169,6 @@ class PlayerService
 
         $player->forceFill([
             'name' => $name,
-            'nickname' => $nickname,
             'gender' => $gender,
             'dupr_id' => $duprId,
             'dupr_rating' => $rating,

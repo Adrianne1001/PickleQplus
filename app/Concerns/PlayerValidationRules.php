@@ -32,16 +32,16 @@ trait PlayerValidationRules
         );
 
         return [
-            'name' => $updating ? ['sometimes', 'required', 'string', 'max:120'] : ['required', 'string', 'max:120'],
-            'nickname' => [
-                'sometimes',
-                'nullable',
-                'string',
-                'max:20',
-                fn (string $attribute, mixed $value, \Closure $fail) => is_string($value) && Player::nicknameTaken($club->id, trim($value), $player?->id)
-                    ? $fail('That nickname is already taken in this club.')
-                    : null,
-            ],
+            'name' => array_merge(
+                $updating ? ['sometimes', 'required'] : ['required'],
+                [
+                    'string',
+                    'max:120',
+                    fn (string $attribute, mixed $value, \Closure $fail) => is_string($value) && Player::nameTaken($club->id, $value, $player?->id)
+                        ? $fail('A player with that name is already on the roster.')
+                        : null,
+                ],
+            ),
             'gender' => ['sometimes', 'nullable', Rule::enum(Gender::class)],
             'dupr_id' => [
                 'sometimes',

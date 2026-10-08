@@ -41,7 +41,6 @@ new #[Title('Players')] class extends Component {
     public ?int $editingId = null;
 
     public string $name = '';
-    public string $nickname = '';
     public string $gender = '';
     public string $dupr_id = '';
     public string $dupr_rating = '';
@@ -164,7 +163,6 @@ new #[Title('Players')] class extends Component {
         $this->resetForm();
         $this->editingId = $player->id;
         $this->name = $player->name;
-        $this->nickname = $player->nickname ?? '';
         $this->gender = $player->gender?->value ?? '';
         $this->dupr_id = $player->dupr_id ?? '';
         $this->dupr_rating = $player->dupr_rating !== null ? rtrim(rtrim($player->dupr_rating, '0'), '.') : '';
@@ -192,7 +190,6 @@ new #[Title('Players')] class extends Component {
             $this->dupr_rating,
             $this->rating_source,
             $this->stars,
-            $this->nickname,
             $this->gender,
         );
 
@@ -376,7 +373,7 @@ new #[Title('Players')] class extends Component {
 
     private function resetForm(): void
     {
-        $this->reset('editingId', 'name', 'nickname', 'gender', 'dupr_id', 'dupr_rating', 'stars');
+        $this->reset('editingId', 'name', 'gender', 'dupr_id', 'dupr_rating', 'stars');
         $this->rating_source = RatingSource::Manual->value;
         $this->resetErrorBag();
     }
@@ -433,9 +430,6 @@ new #[Title('Players')] class extends Component {
                         <tr wire:key="player-{{ $player->id }}" @class(['hover:bg-zinc-50 dark:hover:bg-zinc-800/40', 'text-zinc-600 dark:text-zinc-400' => ! $player->active, 'text-zinc-900 dark:text-zinc-100' => $player->active])>
                             <td class="px-4 py-3 font-medium">
                                 <a href="{{ route('clubs.players.show', [$club, $player]) }}" wire:navigate class="hover:text-brand-700 hover:underline dark:hover:text-brand-400" data-test="player-profile-link">{{ $player->name }}</a>
-                                @if ($player->nickname)
-                                    <span class="font-normal text-zinc-600 dark:text-zinc-400" data-test="player-nickname">"{{ $player->nickname }}"</span>
-                                @endif
                             </td>
                             <td class="px-4 py-3" data-test="player-gender">{{ $player->gender?->label() ?? '–' }}</td>
                             <td class="px-4 py-3 font-mono">{{ $player->dupr_id ?? '–' }}</td>
@@ -618,15 +612,13 @@ new #[Title('Players')] class extends Component {
         <form wire:submit="save" class="space-y-6" data-test="player-form">
             <flux:heading size="lg">{{ $editingId === null ? __('Add player') : __('Edit player') }}</flux:heading>
 
-            <flux:input wire:model="name" :label="__('Name')" required maxlength="120" autocomplete="off" />
-
             <flux:input
-                wire:model="nickname"
-                :label="__('Nickname (optional)')"
-                :description="__('Shown on the public queue and TV instead of the full name. Unique in the club.')"
-                maxlength="20"
+                wire:model="name"
+                :label="__('Name')"
+                :description="__('Full name or nickname, whatever the player goes by. Shown on the TV and public queue. Must be unique in the club.')"
+                required
+                maxlength="120"
                 autocomplete="off"
-                data-test="nickname-input"
             />
 
             <flux:select wire:model="gender" :label="__('Gender (optional)')" :description="__('Needed for mixed doubles.')" data-test="gender-input">
@@ -672,12 +664,11 @@ new #[Title('Players')] class extends Component {
                     @endif
                 </div>
             @else
-                <flux:select wire:model="stars" :label="__('Stars')" data-test="manual-stars">
-                    <option value="">{{ __('Choose stars') }}</option>
-                    @foreach (range(1, 6) as $n)
-                        <option value="{{ $n }}">{{ str_repeat('★', $n) }} ({{ $n }})</option>
-                    @endforeach
-                </flux:select>
+                <flux:field data-test="manual-stars">
+                    <flux:label>{{ __('Stars') }}</flux:label>
+                    <x-star-picker model="stars" :label="__('Stars')" />
+                    <flux:error name="stars" />
+                </flux:field>
                 @unless ($hasRating)
                     <flux:text size="sm">{{ __('Players without a DUPR rating need their stars set by hand.') }}</flux:text>
                 @endunless

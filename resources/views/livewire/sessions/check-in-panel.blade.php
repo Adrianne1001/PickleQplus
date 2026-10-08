@@ -53,9 +53,6 @@
                 <li class="flex flex-wrap items-center justify-between gap-3 px-5 py-3" wire:key="entry-{{ $entry->id }}" data-test="checked-in-row">
                     <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
                         <span class="font-semibold text-zinc-900 dark:text-white">{{ $entry->player->name }}</span>
-                        @if ($entry->player->nickname)
-                            <span class="text-sm text-zinc-600 dark:text-zinc-400" data-test="entry-nickname">"{{ $entry->player->nickname }}"</span>
-                        @endif
                         @if (in_array($entry->player_id, $this->newPlayerIds, true))
                             <span data-test="new-badge"><flux:badge size="sm" color="purple">{{ __('new') }}</flux:badge></span>
                         @endif

@@ -1,7 +1,7 @@
 @props(['rows', 'showRank' => true, 'empty' => null])
 
 {{--
-    Standings table. Rows: rank, name, nickname?, url? (staff profile link; absent on public pages),
+    Standings table. Rows: rank, name, url? (staff profile link; absent on public pages),
     played, wins, losses, win_pct, point_diff.
 --}}
 <div class="overflow-x-auto rounded-2xl border border-zinc-200 bg-white shadow-xs dark:border-zinc-700 dark:bg-zinc-900" {{ $attributes }}>
@@ -30,9 +30,6 @@
                             <a href="{{ $row['url'] }}" wire:navigate class="hover:text-brand-700 hover:underline dark:hover:text-brand-400">{{ $row['name'] }}</a>
                         @else
                             {{ $row['name'] }}
-                        @endif
-                        @if (! empty($row['nickname']))
-                            <span class="font-normal text-zinc-600 dark:text-zinc-400">"{{ $row['nickname'] }}"</span>
                         @endif
                     </td>
                     <td class="px-4 py-3 text-end tabular-nums">{{ $row['played'] }}</td>

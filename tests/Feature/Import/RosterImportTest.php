@@ -85,7 +85,6 @@ test('rows are validated', function () {
 test('players match by DUPR ID first, even when the name differs', function () {
     $club = Club::factory()->create();
     $byId = Player::factory()->for($club)->rated(3.0, 'AAAAAA')->create(['name' => 'Old Name']);
-    Player::factory()->for($club)->manual(2)->create(['name' => 'New Name']);
 
     $preview = importPreview($club, "name,dupr_id,dupr_rating\nNew Name,aaaaaa,4.5\n");
 
@@ -98,7 +97,22 @@ test('players match by DUPR ID first, even when the name differs', function () {
     expect($result->updated)->toBe(1)
         ->and($byId->name)->toBe('New Name')
         ->and($byId->stars)->toBe(6)
-        ->and($club->players()->count())->toBe(2);
+        ->and($club->players()->count())->toBe(1);
+});
+
+test('a DUPR match cannot be renamed onto another name', function () {
+    $club = Club::factory()->create();
+    $byId = Player::factory()->for($club)->rated(3.0, 'AAAAAA')->create(['name' => 'Old Name']);
+    Player::factory()->for($club)->manual(2)->create(['name' => 'New Name']);
+
+    $preview = importPreview($club, 'name,dupr_id,dupr_rating
+new name,aaaaaa,4.5
+');
+    $result = app(RosterImportService::class)->commit($club, $preview);
+
+    expect($preview->rows[0]->action)->toBe('error')
+        ->and($result->updated)->toBe(0)
+        ->and($byId->fresh()->name)->toBe('Old Name');
 });
 
 test('players match by case-insensitive trimmed name', function () {
@@ -117,19 +131,6 @@ test('players match by case-insensitive trimmed name', function () {
         ->and($club->players()->count())->toBe(1);
 });
 
-test('several name matches make the row an error', function () {
-    $club = Club::factory()->create();
-    Player::factory()->for($club)->count(2)->create(['name' => 'Alex Twin']);
-
-    $preview = importPreview($club, "name\nalex twin\n");
-
-    expect($preview->rows[0]->action)->toBe('error')
-        ->and($preview->hasErrors())->toBeTrue();
-
-    $result = app(RosterImportService::class)->commit($club, $preview);
-    expect($result->errors)->toBe(1)->and($result->created + $result->updated)->toBe(0);
-});
-
 test('duplicates inside the file are errors', function () {
     $club = Club::factory()->create();
 
@@ -140,7 +141,7 @@ test('duplicates inside the file are errors', function () {
         'Cat,,',
         'cat ,,',          // same name, no IDs
         'Dan,DDDDDD,',
-        'Dan,EEEEEE,',     // same name but different IDs: two people
+        'dan,EEEEEE,',     // same name (any case), different IDs: still one name per club
         'Eve,FFFFFF,',
         'Eve,,',           // same name, one without ID
     ]));
@@ -151,7 +152,7 @@ test('duplicates inside the file are errors', function () {
         ->and($rows[4]->action)->toBe('create')
         ->and($rows[5]->action)->toBe('error')
         ->and($rows[6]->action)->toBe('create')
-        ->and($rows[7]->action)->toBe('create')
+        ->and($rows[7]->action)->toBe('error')   // names are unique per club even with different DUPR IDs
         ->and($rows[8]->action)->toBe('create')
         ->and($rows[9]->action)->toBe('error');
 });

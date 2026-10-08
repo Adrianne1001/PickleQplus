@@ -24,7 +24,7 @@ use InvalidArgumentException;
  * case) matched case-insensitively in any order; only `name` is required; extra columns are ignored. Blank lines are ignored.
  *
  * Matching is always inside the given club: by DUPR ID first, then by
- * case-insensitive trimmed name (several name matches is an error).
+ * case-insensitive trimmed name (names are unique per club).
  * A blank dupr_id, dupr_rating or gender in the file never clears existing values.
  * An invalid gender makes the row an error.
  *
@@ -99,17 +99,12 @@ class RosterImportService
             }
             $nameKey = $this->nameKey($raw['name']);
             if ($errors === [] && isset($seenNames[$nameKey])) {
-                foreach ($seenNames[$nameKey] as [$otherLine, $otherHasId]) {
-                    // Same name is fine only when both rows carry (different) DUPR IDs.
-                    if (! $otherHasId || $duprId === null) {
-                        $errors[] = "Duplicate name (also on line {$otherLine}).";
-                        break;
-                    }
-                }
+                // Names are unique per club, so a repeated name is always a duplicate.
+                $errors[] = "Duplicate name (also on line {$seenNames[$nameKey]}).";
             }
 
-            if ($raw['name'] !== '') {
-                $seenNames[$nameKey][] = [$line, $duprId !== null];
+            if ($raw['name'] !== '' && ! isset($seenNames[$nameKey])) {
+                $seenNames[$nameKey] = $line;
             }
             if ($duprId !== null && $errors === []) {
                 $seenDuprIds[$duprId] = $line;
@@ -127,11 +122,6 @@ class RosterImportService
                 $match = $byDuprId[$duprId];
             } else {
                 $named = $byName[$nameKey] ?? [];
-                if (count($named) > 1) {
-                    $rows[] = new RosterImportRow($line, RosterImportRow::ERROR, ['Several existing players match this name; match by DUPR ID instead.'], $data, null, $genderValue);
-
-                    continue;
-                }
                 $match = $named[0] ?? null;
 
                 // A name match must never overwrite a different DUPR ID: it could be another person.
@@ -146,6 +136,15 @@ class RosterImportService
                 $rows[] = new RosterImportRow($line, RosterImportRow::CREATE, [], $data, null, $genderValue);
 
                 continue;
+            }
+
+            // Names are unique per club: renaming a DUPR-matched player onto another player's name is a conflict.
+            foreach ($byName[$nameKey] ?? [] as $other) {
+                if ($other->id !== $match->id) {
+                    $rows[] = new RosterImportRow($line, RosterImportRow::ERROR, ['Another player in this club already has this name.'], $data, $match->id, $genderValue);
+
+                    continue 2;
+                }
             }
 
             if (isset($targeted[$match->id])) {

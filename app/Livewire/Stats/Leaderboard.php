@@ -38,7 +38,6 @@ class Leaderboard extends Component
         $map = fn (array $rows): array => array_map(fn (RankedRow $r): array => [
             'rank' => $r->rank,
             'name' => $r->row->name,
-            'nickname' => $r->row->nickname,
             'url' => route('clubs.players.show', [$this->club, (int) $r->row->id]),
             'played' => $r->row->played,
             'wins' => $r->row->wins,

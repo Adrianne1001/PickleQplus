@@ -227,7 +227,6 @@ test('a court error from the service shows in the board callout', function () {
 test('the tv and public queue group by label and never show stars', function () {
     $session = uiSkillBoard();
     uiSkillJoin($session, [5, 2, 6, 1, 4, 3, 5, 2, 6, 3, 1]);
-    Player::query()->update(['nickname' => null]);
 
     $tv = Livewire::test(Tv::class, ['club' => $session->club, 'tvId' => $session->tv_id])
         ->assertSee('Skill courts')

@@ -14,7 +14,6 @@ final readonly class StatRow
         public int $wins,
         public int $pointsFor,
         public int $pointsAgainst,
-        public ?string $nickname = null,
     ) {}
 
     public function losses(): int

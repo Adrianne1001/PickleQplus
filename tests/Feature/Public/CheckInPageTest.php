@@ -32,9 +32,9 @@ test('a live token renders the page', function () {
     $this->get('/checkin/'.$session->checkin_token)->assertOk()->assertSee($session->name)->assertSee('Find your name');
 });
 
-test('search is debounced, needs 2 chars, and shows full name, nickname and checked-in state', function () {
+test('search is debounced, needs 2 chars, and shows the name as entered and checked-in state', function () {
     $session = checkinSession();
-    $mia = Player::factory()->for($session->club)->create(['name' => 'Mia Fullname', 'nickname' => 'Miaow']);
+    $mia = Player::factory()->for($session->club)->create(['name' => 'Mia Fullname']);
     $in = Player::factory()->for($session->club)->create(['name' => 'Mick Already']);
     SessionPlayer::factory()->create(['play_session_id' => $session->id, 'player_id' => $in->id]);
 
@@ -44,14 +44,13 @@ test('search is debounced, needs 2 chars, and shows full name, nickname and chec
         ->assertSet('results', [])
         ->set('search', 'Mi')
         ->assertSee('Mia Fullname')
-        ->assertSee('Miaow')
         ->assertSee('Mick Already')
         ->assertSee('Checked in');
 });
 
 test('tapping a result confirms then checks in and remembers me', function () {
     $session = checkinSession();
-    $player = Player::factory()->for($session->club)->create(['name' => 'Tess Tapper', 'nickname' => 'Tess']);
+    $player = Player::factory()->for($session->club)->create(['name' => 'Tess Tapper']);
 
     Livewire::test(CheckIn::class, ['token' => $session->checkin_token])
         ->set('search', 'Tess')
@@ -79,23 +78,6 @@ test('checking in twice says already checked in', function () {
     expect(SessionPlayer::query()->where('player_id', $player->id)->count())->toBe(1);
 });
 
-test('a nickname is offered only when empty and never overwrites', function () {
-    $session = checkinSession();
-    $none = Player::factory()->for($session->club)->create(['name' => 'Nina Nonick', 'nickname' => null]);
-    $has = Player::factory()->for($session->club)->create(['name' => 'Nate Hasnick', 'nickname' => 'Nate']);
-
-    $page = Livewire::test(CheckIn::class, ['token' => $session->checkin_token]);
-    $page->set('search', 'Nate')->call('select', $has->public_id)->assertDontSeeHtml('data-test="checkin-nickname"')
-        ->set('nickname', 'Hacked')->call('confirm');
-    expect($has->fresh()->nickname)->toBe('Nate');
-
-    Livewire::test(CheckIn::class, ['token' => $session->checkin_token])
-        ->set('search', 'Nina')->call('select', $none->public_id)
-        ->assertSeeHtml('data-test="checkin-nickname"')
-        ->set('nickname', 'Neen')->call('confirm')->assertHasNoErrors();
-    expect($none->fresh()->nickname)->toBe('Neen');
-});
-
 test('registering creates a player, checks them in and lists the star levels', function () {
     $session = checkinSession();
 
@@ -104,7 +86,6 @@ test('registering creates a player, checks them in and lists the star levels', f
         ->assertSee('New to pickleball')
         ->assertSee('Tournament level')
         ->set('regName', 'Rae Newbie')
-        ->set('regNickname', 'Rae')
         ->set('regStars', '3')
         ->call('register')
         ->assertHasNoErrors()
@@ -117,20 +98,29 @@ test('registering creates a player, checks them in and lists the star levels', f
 
 test('register shows validation errors inline', function () {
     $session = checkinSession();
-    Player::factory()->for($session->club)->create(['nickname' => 'Taken']);
 
     Livewire::test(CheckIn::class, ['token' => $session->checkin_token])
         ->call('startRegister')
         ->set('regName', 'Sam')
-        ->set('regNickname', 'taken')
-        ->set('regStars', '3')
-        ->call('register')
-        ->assertHasErrors('nickname')
-        ->assertSee('already on the roster')
-        ->set('regNickname', 'Sammy')
         ->set('regStars', '9')
         ->call('register')
         ->assertHasErrors('stars');
+});
+
+test('register rejects an existing name in a different case', function () {
+    $session = checkinSession();
+    Player::factory()->for($session->club)->create(['name' => 'Taken Tim']);
+
+    Livewire::test(CheckIn::class, ['token' => $session->checkin_token])
+        ->call('startRegister')
+        ->assertSee('your name or a nickname')
+        ->set('regName', 'tAKEN tIM')
+        ->set('regStars', '3')
+        ->call('register')
+        ->assertHasErrors('name')
+        ->assertSee('already on the roster');
+
+    expect(Player::query()->where('club_id', $session->club_id)->count())->toBe(1);
 });
 
 test('a regenerated token stops the form', function () {

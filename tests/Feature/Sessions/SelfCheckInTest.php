@@ -48,37 +48,34 @@ function expectInvalid(Closure $fn, string $key): void
 
 beforeEach(fn () => RateLimiter::clear('x'));
 
-test('publicName uses nickname, else first name and last initial', function () {
-    expect((new Player(['name' => 'Adrianne Basuel']))->publicName())->toBe('Adrianne B.')
-        ->and((new Player(['name' => 'Mary Jane van der Berg']))->publicName())->toBe('Mary B.')
-        ->and((new Player(['name' => 'Cher']))->publicName())->toBe('Cher')
-        ->and((new Player(['name' => 'Adrianne Basuel', 'nickname' => 'AB']))->publicName())->toBe('AB');
-});
-
-test('nickname is unique per club case-insensitively but reusable across clubs', function () {
+test('name is unique per club case-insensitively but reusable across clubs', function () {
     $club = Club::factory()->create();
     $svc = app(PlayerService::class);
-    $svc->create($club, ['name' => 'A One', 'nickname' => 'Ace', 'stars' => 3]);
+    $svc->create($club, ['name' => 'Ace', 'stars' => 3]);
 
-    expectInvalid(fn () => $svc->create($club, ['name' => 'B Two', 'nickname' => 'aCE', 'stars' => 3]), 'nickname');
-    expectInvalid(fn () => $svc->create($club, ['name' => 'B Two', 'nickname' => str_repeat('x', 21), 'stars' => 3]), 'nickname');
+    expectInvalid(fn () => $svc->create($club, ['name' => 'aCE', 'stars' => 3]), 'name');
+    expectInvalid(fn () => $svc->create($club, ['name' => ' ACE ', 'stars' => 3]), 'name');
 
-    $ok = $svc->create(Club::factory()->create(), ['name' => 'C Three', 'nickname' => 'Ace', 'stars' => 3]);
-    $blank = $svc->create($club, ['name' => 'D Four', 'nickname' => '  ', 'stars' => 3]);
-    expect($ok->nickname)->toBe('Ace')->and($blank->nickname)->toBeNull();
+    $other = $svc->create(Club::factory()->create(), ['name' => 'Ace', 'stars' => 3]);
+    expect($other->name)->toBe('Ace')
+        ->and(Player::nameTaken($club->id, 'ace'))->toBeTrue()
+        ->and(Player::nameTaken($club->id, 'Ace', Player::query()->where('club_id', $club->id)->value('id')))->toBeFalse();
 });
 
-test('search needs 2 chars, matches name or nickname, caps at 10, active only, club only', function () {
+test('search needs 2 chars, matches name only, caps at 10, active only, club only', function () {
     $club = Club::factory()->create();
     $session = selfLiveSession($club);
-    Player::factory()->count(12)->for($club)->create(['name' => 'Sam Player']);
-    Player::factory()->for($club)->create(['name' => 'Zed Quiet', 'nickname' => 'Samurai']);
+    foreach (range(1, 12) as $i) {
+        Player::factory()->for($club)->create(['name' => "Sam Player {$i}"]);
+    }
+    Player::factory()->for($club)->create(['name' => 'Samurai']);
     Player::factory()->for($club)->create(['name' => 'Sam Gone', 'active' => false]);
     Player::factory()->create(['name' => 'Sam Elsewhere']);
 
     expect(selfSvc()->search($session, (string) $session->checkin_token, 's', '1.1.1.1'))->toBe([])
         ->and(selfSvc()->search($session, (string) $session->checkin_token, 'sam', '1.1.1.1'))->toHaveCount(10)
         ->and(selfSvc()->search($session, (string) $session->checkin_token, 'samur', '1.1.1.1'))->toHaveCount(1)
+        ->and(selfSvc()->search($session, (string) $session->checkin_token, 'sam', '1.1.1.1')[0])->not->toHaveKey('nickname')
         ->and(selfSvc()->search($session, (string) $session->checkin_token, 'Gone', '1.1.1.1'))->toBe([])
         ->and(selfSvc()->search($session, (string) $session->checkin_token, '%%', '1.1.1.1'))->toBe([]);
 });
@@ -96,35 +93,32 @@ test('search reports who is already checked in', function () {
         ->and(collect($rows)->where('status', null))->toHaveCount(1);
 });
 
-test('checkIn checks in, sets an empty nickname once and is idempotent', function () {
+test('checkIn checks in, returns the name as entered and is idempotent', function () {
     $club = Club::factory()->create();
     $session = selfLiveSession($club);
     $player = Player::factory()->for($club)->create(['name' => 'Pat Lee']);
 
-    $first = selfSvc()->checkIn($session, (string) $session->checkin_token, $player->public_id, 'Patty', '1.1.1.1');
-    $second = selfSvc()->checkIn($session, (string) $session->checkin_token, $player->public_id, 'Other', '1.1.1.1');
+    $first = selfSvc()->checkIn($session, (string) $session->checkin_token, $player->public_id, '1.1.1.1');
+    $second = selfSvc()->checkIn($session, (string) $session->checkin_token, $player->public_id, '1.1.1.1');
 
-    expect($first['result'])->toBe('checked_in')->and($first['public_name'])->toBe('Patty')
+    expect($first['result'])->toBe('checked_in')->and($first['public_name'])->toBe('Pat Lee')
         ->and($second['result'])->toBe('already_checked_in')
-        ->and($player->fresh()->nickname)->toBe('Patty')
         ->and(SessionPlayer::query()->where('player_id', $player->id)->count())->toBe(1);
 });
 
-test('checkIn rejects a taken nickname, cross-club ids, inactive players and ended sessions', function () {
+test('checkIn rejects cross-club ids, inactive players and ended sessions', function () {
     $club = Club::factory()->create();
     $session = selfLiveSession($club);
-    Player::factory()->for($club)->create(['nickname' => 'Taken']);
     $mine = Player::factory()->for($club)->create();
     $foreign = Player::factory()->create();
     $inactive = Player::factory()->for($club)->create(['active' => false]);
 
-    expectInvalid(fn () => selfSvc()->checkIn($session, (string) $session->checkin_token, $mine->public_id, 'taken', '2.2.2.2'), 'nickname');
-    expectInvalid(fn () => selfSvc()->checkIn($session, (string) $session->checkin_token, $foreign->public_id, null, '2.2.2.2'), 'player');
-    expectInvalid(fn () => selfSvc()->checkIn($session, (string) $session->checkin_token, $inactive->public_id, null, '2.2.2.2'), 'player');
+    expectInvalid(fn () => selfSvc()->checkIn($session, (string) $session->checkin_token, $foreign->public_id, '2.2.2.2'), 'player');
+    expectInvalid(fn () => selfSvc()->checkIn($session, (string) $session->checkin_token, $inactive->public_id, '2.2.2.2'), 'player');
     expect(SessionPlayer::query()->count())->toBe(0);
 
     $ended = PlaySession::factory()->ended()->for($club)->create();
-    expectInvalid(fn () => selfSvc()->checkIn($ended, (string) $ended->checkin_token, $mine->public_id, null, '2.2.2.2'), 'session');
+    expectInvalid(fn () => selfSvc()->checkIn($ended, (string) $ended->checkin_token, $mine->public_id, '2.2.2.2'), 'session');
     expectInvalid(fn () => selfSvc()->search($ended, (string) $ended->checkin_token, 'abc', '2.2.2.2'), 'session');
 });
 
@@ -134,7 +128,7 @@ test('checkIn fires the change event', function () {
     $player = Player::factory()->for($club)->create();
     Event::fake([PlaySessionChanged::class]);
 
-    selfSvc()->checkIn($session, (string) $session->checkin_token, $player->public_id, null, '3.3.3.3');
+    selfSvc()->checkIn($session, (string) $session->checkin_token, $player->public_id, '3.3.3.3');
 
     Event::assertDispatched(PlaySessionChanged::class);
 });
@@ -142,10 +136,10 @@ test('checkIn fires the change event', function () {
 test('register creates a manual self-registered player and checks them in', function () {
     $session = selfLiveSession();
 
-    $res = selfSvc()->register($session, (string) $session->checkin_token, ' New Person ', 'Newbie', 'ab12cd', 4, '4.4.4.4');
+    $res = selfSvc()->register($session, (string) $session->checkin_token, ' New Person ', 'ab12cd', 4, '4.4.4.4');
 
     $player = Player::query()->where('public_id', $res['player_id'])->firstOrFail();
-    expect($res['result'])->toBe('registered')->and($res['public_name'])->toBe('Newbie')
+    expect($res['result'])->toBe('registered')->and($res['public_name'])->toBe('New Person')
         ->and($player->name)->toBe('New Person')
         ->and($player->dupr_id)->toBe('AB12CD')
         ->and($player->stars)->toBe(4)
@@ -157,17 +151,16 @@ test('register creates a manual self-registered player and checks them in', func
 
 $GLOBALS['ipn'] = 1;
 
-test('register validates input and rejects duplicate nickname or DUPR id', function () {
+test('register validates input and rejects duplicate name (any case) or DUPR id', function () {
     $club = Club::factory()->create();
     $session = selfLiveSession($club);
-    Player::factory()->for($club)->create(['nickname' => 'Dup', 'dupr_id' => 'ZZ99ZZ']);
+    Player::factory()->for($club)->create(['name' => 'Dup Player', 'dupr_id' => 'ZZ99ZZ']);
 
-    expectInvalid(fn () => selfSvc()->register($session, (string) $session->checkin_token, 'A B', 'dUP', null, 3, '5.5.5.'.$GLOBALS['ipn']++), 'nickname');
-    expectInvalid(fn () => selfSvc()->register($session, (string) $session->checkin_token, 'A B', 'Fresh', 'zz99zz', 3, '5.5.5.'.$GLOBALS['ipn']++), 'dupr_id');
-    expectInvalid(fn () => selfSvc()->register($session, (string) $session->checkin_token, 'A B', '', null, 3, '5.5.5.'.$GLOBALS['ipn']++), 'nickname');
-    expectInvalid(fn () => selfSvc()->register($session, (string) $session->checkin_token, 'A B', 'Fresh', null, 7, '5.5.5.'.$GLOBALS['ipn']++), 'stars');
-    expectInvalid(fn () => selfSvc()->register($session, (string) $session->checkin_token, 'A B', 'Fresh', 'bad', 3, '5.5.5.'.$GLOBALS['ipn']++), 'dupr_id');
-    expectInvalid(fn () => selfSvc()->register($session, (string) $session->checkin_token, '', 'Fresh', null, 3, '5.5.5.'.$GLOBALS['ipn']++), 'name');
+    expectInvalid(fn () => selfSvc()->register($session, (string) $session->checkin_token, 'dUP PLAYER', null, 3, '5.5.5.'.$GLOBALS['ipn']++), 'name');
+    expectInvalid(fn () => selfSvc()->register($session, (string) $session->checkin_token, 'A B', 'zz99zz', 3, '5.5.5.'.$GLOBALS['ipn']++), 'dupr_id');
+    expectInvalid(fn () => selfSvc()->register($session, (string) $session->checkin_token, 'A B', null, 7, '5.5.5.'.$GLOBALS['ipn']++), 'stars');
+    expectInvalid(fn () => selfSvc()->register($session, (string) $session->checkin_token, 'A B', 'bad', 3, '5.5.5.'.$GLOBALS['ipn']++), 'dupr_id');
+    expectInvalid(fn () => selfSvc()->register($session, (string) $session->checkin_token, '', null, 3, '5.5.5.'.$GLOBALS['ipn']++), 'name');
     expect(Player::query()->count())->toBe(1);
 });
 
@@ -183,16 +176,16 @@ test('rate limits: searches, submits and registrations per IP', function () {
 
     $player = Player::factory()->for($club)->create();
     for ($i = 0; $i < SelfCheckInService::SUBMITS_PER_MINUTE; $i++) {
-        selfSvc()->checkIn($session, (string) $session->checkin_token, $player->public_id, null, '7.7.7.7');
+        selfSvc()->checkIn($session, (string) $session->checkin_token, $player->public_id, '7.7.7.7');
     }
-    expectInvalid(fn () => selfSvc()->checkIn($session, (string) $session->checkin_token, $player->public_id, null, '7.7.7.7'), 'throttle');
+    expectInvalid(fn () => selfSvc()->checkIn($session, (string) $session->checkin_token, $player->public_id, '7.7.7.7'), 'throttle');
 
     for ($i = 0; $i < SelfCheckInService::REGISTRATIONS_PER_HOUR; $i++) {
-        selfSvc()->register($session, (string) $session->checkin_token, 'Reg '.$i, 'nick'.$i, null, 2, '8.8.8.8');
+        selfSvc()->register($session, (string) $session->checkin_token, 'Reg '.$i, null, 2, '8.8.8.8');
         RateLimiter::clear('selfcheckin:submit:8.8.8.8:'.$session->id);
     }
-    expectInvalid(fn () => selfSvc()->register($session, (string) $session->checkin_token, 'Reg X', 'nickx', null, 2, '8.8.8.8'), 'throttle');
-    expect(Player::query()->where('nickname', 'nickx')->exists())->toBeFalse();
+    expectInvalid(fn () => selfSvc()->register($session, (string) $session->checkin_token, 'Reg X', null, 2, '8.8.8.8'), 'throttle');
+    expect(Player::query()->where('name', 'Reg X')->exists())->toBeFalse();
 });
 
 test('removeCheckIn is staff only and deletes entry and spam player', function () {
@@ -200,7 +193,7 @@ test('removeCheckIn is staff only and deletes entry and spam player', function (
     app(ClubService::class)->create($user, ['name' => 'Club']);
     $club = $user->clubs()->firstOrFail();
     $session = selfLiveSession($club);
-    $res = selfSvc()->register($session, (string) $session->checkin_token, 'Spam Bot', 'spam', null, 1, '10.0.0.1');
+    $res = selfSvc()->register($session, (string) $session->checkin_token, 'Spam Bot', null, 1, '10.0.0.1');
     $player = Player::query()->where('public_id', $res['player_id'])->firstOrFail();
 
     expect(fn () => app(CheckInService::class)->removeCheckIn($session, $player, User::factory()->create()))
@@ -255,13 +248,13 @@ test('removeCheckIn keeps a self-registered player who has history elsewhere', f
     expect(Player::query()->whereKey($player->id)->exists())->toBeTrue();
 });
 
-test('public snapshot has only public names and no full names or DUPR data', function () {
+test('public snapshot shows names exactly as entered and no DUPR data', function () {
     $club = Club::factory()->create();
     $session = selfLiveSession($club);
     $checkIn = app(CheckInService::class);
     $names = ['Alice Anderson', 'Bob Brown', 'Carol Chen', 'Dave Diaz', 'Eve Evans', 'Finn Fox'];
     foreach ($names as $i => $n) {
-        $p = Player::factory()->for($club)->create(['name' => $n, 'dupr_id' => 'ID000'.$i, 'nickname' => $i === 0 ? 'Ally' : null]);
+        $p = Player::factory()->for($club)->create(['name' => $n, 'dupr_id' => 'ID000'.$i]);
         $checkIn->checkIn($session, $p);
     }
     app(CheckInService::class)->goOnBreak($session, Player::query()->where('name', 'Finn Fox')->firstOrFail());
@@ -276,8 +269,8 @@ test('public snapshot has only public names and no full names or DUPR data', fun
         ->and($snap['players'])->toHaveCount(6)
         ->and($snap['waiting'][0])->toHaveKeys(['position', 'id', 'name', 'estimate_minutes'])
         ->and($snap['waiting'][0]['position'])->toBe(1)
-        ->and($json)->toContain('Ally')->toContain('Bob B.')
-        ->and($json)->not->toContain('Anderson')->not->toContain('Brown')->not->toContain('ID000')
+        ->and($json)->toContain('Alice Anderson')->toContain('Bob Brown')
+        ->and($json)->not->toContain('ID000')
         ->not->toContain('stars')->not->toContain('dupr');
 });
 
@@ -303,27 +296,27 @@ test('a stale token is rejected after regenerate for search, checkIn and registe
     app(PlaySessionService::class)->regenerateCheckinToken($session, $user);
 
     expectInvalid(fn () => selfSvc()->search($session, $old, 'ab', '11.0.0.1'), 'session');
-    expectInvalid(fn () => selfSvc()->checkIn($session, $old, $player->public_id, null, '11.0.0.1'), 'session');
-    expectInvalid(fn () => selfSvc()->register($session, $old, 'A B', 'nn', null, 3, '11.0.0.1'), 'session');
+    expectInvalid(fn () => selfSvc()->checkIn($session, $old, $player->public_id, '11.0.0.1'), 'session');
+    expectInvalid(fn () => selfSvc()->register($session, $old, 'A B', null, 3, '11.0.0.1'), 'session');
     expect(SessionPlayer::query()->count())->toBe(0);
 
-    selfSvc()->checkIn($session, (string) $session->checkin_token, $player->public_id, null, '11.0.0.1');
+    selfSvc()->checkIn($session, (string) $session->checkin_token, $player->public_id, '11.0.0.1');
     expect(SessionPlayer::query()->count())->toBe(1);
 });
 
 test('a failed registration does not use the hourly quota', function () {
     $club = Club::factory()->create();
     $session = selfLiveSession($club);
-    Player::factory()->for($club)->create(['nickname' => 'Taken']);
+    Player::factory()->for($club)->create(['name' => 'Taken']);
     $token = (string) $session->checkin_token;
 
     for ($i = 0; $i < 8; $i++) {
         RateLimiter::clear('selfcheckin:submit:12.0.0.1:'.$session->id);
-        expectInvalid(fn () => selfSvc()->register($session, $token, 'A B', 'taken', null, 3, '12.0.0.1'), 'nickname');
+        expectInvalid(fn () => selfSvc()->register($session, $token, 'taken', null, 3, '12.0.0.1'), 'name');
     }
-    selfSvc()->register($session, $token, 'A B', 'fresh', null, 3, '12.0.0.1');
+    selfSvc()->register($session, $token, 'Fresh', null, 3, '12.0.0.1');
 
-    expect(Player::query()->where('nickname', 'fresh')->exists())->toBeTrue();
+    expect(Player::query()->where('name', 'Fresh')->exists())->toBeTrue();
 });
 
 test('unknown and other-club player public ids are rejected', function () {
@@ -331,8 +324,8 @@ test('unknown and other-club player public ids are rejected', function () {
     $foreign = Player::factory()->create();
     $token = (string) $session->checkin_token;
 
-    expectInvalid(fn () => selfSvc()->checkIn($session, $token, 'nope', null, '13.0.0.1'), 'player');
-    expectInvalid(fn () => selfSvc()->checkIn($session, $token, (string) $foreign->public_id, null, '13.0.0.1'), 'player');
+    expectInvalid(fn () => selfSvc()->checkIn($session, $token, 'nope', '13.0.0.1'), 'player');
+    expectInvalid(fn () => selfSvc()->checkIn($session, $token, (string) $foreign->public_id, '13.0.0.1'), 'player');
     expect($foreign->public_id)->toMatch('/^[a-z0-9]{12}$/');
 });
 
@@ -341,11 +334,11 @@ test('checking in a player on break returns them from break explicitly', functio
     $session = selfLiveSession($club);
     $player = Player::factory()->for($club)->create();
     $token = (string) $session->checkin_token;
-    selfSvc()->checkIn($session, $token, $player->public_id, null, '14.0.0.1');
+    selfSvc()->checkIn($session, $token, $player->public_id, '14.0.0.1');
     app(CheckInService::class)->goOnBreak($session, $player);
 
     $rows = selfSvc()->search($session, $token, $player->name, '14.0.0.1');
-    $res = selfSvc()->checkIn($session, $token, $player->public_id, null, '14.0.0.1');
+    $res = selfSvc()->checkIn($session, $token, $player->public_id, '14.0.0.1');
 
     expect($rows[0]['status'])->toBe('break')
         ->and($res['result'])->toBe('returned_from_break')
@@ -373,7 +366,7 @@ test('self-registered marker follows the registration session, not later check-i
     app(ClubService::class)->create($user, ['name' => 'Club']);
     $club = $user->clubs()->firstOrFail();
     $a = PlaySession::factory()->for($club)->create();
-    $res = selfSvc()->register($a, (string) $a->checkin_token, 'Reg Person', 'regp', null, 3, '15.0.0.1');
+    $res = selfSvc()->register($a, (string) $a->checkin_token, 'Reg Person', null, 3, '15.0.0.1');
     $player = Player::query()->where('public_id', $res['player_id'])->firstOrFail();
     $b = PlaySession::factory()->for($club)->create();
     $svc = app(CheckInService::class);
@@ -415,5 +408,5 @@ test('the per-session cap error uses the register key', function () {
         SessionPlayer::factory()->create(['play_session_id' => $session->id, 'player_id' => $p->id]);
     }
 
-    expectInvalid(fn () => selfSvc()->register($session, (string) $session->checkin_token, 'One More', 'lastone', null, 2, '16.0.0.1'), 'register');
+    expectInvalid(fn () => selfSvc()->register($session, (string) $session->checkin_token, 'One More', null, 2, '16.0.0.1'), 'register');
 });

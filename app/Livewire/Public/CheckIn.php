@@ -18,7 +18,7 @@ use Livewire\Component;
  * The token is re-resolved on every request, so regenerating it or ending the
  * session closes the page at once. Throttles and rules live in SelfCheckInService.
  *
- * @phpstan-type SearchRow array{id: string, name: string, nickname: string|null, needs_gender: bool, status: string|null}
+ * @phpstan-type SearchRow array{id: string, name: string, needs_gender: bool, status: string|null}
  */
 #[Layout('layouts::public')]
 #[Title('Check in')]
@@ -37,9 +37,6 @@ class CheckIn extends Component
     #[Locked]
     public ?string $selectedId = null;
 
-    /** Optional nickname offered at check-in when the player has none. */
-    public string $nickname = '';
-
     /** Optional gender offered at check-in when the player has none. */
     public string $gender = '';
 
@@ -50,8 +47,6 @@ class CheckIn extends Component
     public bool $registering = false;
 
     public string $regName = '';
-
-    public string $regNickname = '';
 
     public string $regDuprId = '';
 
@@ -77,7 +72,6 @@ class CheckIn extends Component
     public function updatedSearch(SelfCheckInService $checkIns): void
     {
         $this->selectedId = null;
-        $this->nickname = '';
         $this->gender = '';
         $this->needsGender = false;
         $this->results = [];
@@ -94,7 +88,6 @@ class CheckIn extends Component
     public function select(string $playerId): void
     {
         $this->resetErrorBag();
-        $this->nickname = '';
         $this->gender = '';
         $this->selectedId = collect($this->results)->contains('id', $playerId) ? $playerId : null;
         $row = collect($this->results)->firstWhere('id', $this->selectedId);
@@ -108,7 +101,6 @@ class CheckIn extends Component
     public function cancelSelect(): void
     {
         $this->selectedId = null;
-        $this->nickname = '';
         $this->gender = '';
         $this->needsGender = false;
         $this->resetErrorBag();
@@ -124,7 +116,7 @@ class CheckIn extends Component
         }
 
         try {
-            $this->finish($checkIns->checkIn($session, $this->token, $this->selectedId, $this->nickname === '' ? null : $this->nickname, (string) request()->ip(), $this->needsGender && $this->gender !== '' ? $this->gender : null), $session);
+            $this->finish($checkIns->checkIn($session, $this->token, $this->selectedId, (string) request()->ip(), $this->needsGender && $this->gender !== '' ? $this->gender : null), $session);
         } catch (ValidationException $e) {
             $this->setErrorBag($e->validator->errors());
         }
@@ -158,7 +150,6 @@ class CheckIn extends Component
                 $session,
                 $this->token,
                 $this->regName,
-                $this->regNickname,
                 $this->regDuprId === '' ? null : $this->regDuprId,
                 $this->regStars,
                 (string) request()->ip(),

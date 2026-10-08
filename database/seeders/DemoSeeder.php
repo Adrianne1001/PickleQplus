@@ -37,13 +37,13 @@ class DemoSeeder extends Seeder
     public const STAFF_EMAIL = 'staff@example.com';
 
     /**
-     * Name, DUPR rating (null = unrated), manual stars for unrated players, nickname.
+     * Name, DUPR rating (null = unrated), manual stars for unrated players.
      *
-     * @var list<array{0: string, 1: float|null, 2?: int, 3?: string}>
+     * @var list<array{0: string, 1: float|null, 2?: int}>
      */
     private const PLAYERS = [
-        ['Maria Santos', 4.62], ['James Carter', 4.21, 0, 'JC'], ['Priya Patel', 3.95], ['Liam O\'Connor', 3.74],
-        ['Sofia Ramirez', 3.52], ['Daniel Kim', 3.31], ['Aisha Khan', 3.18, 0, 'Ace'], ['Tomas Novak', 3.05],
+        ['Maria Santos', 4.62], ['James Carter', 4.21], ['Priya Patel', 3.95], ['Liam O\'Connor', 3.74],
+        ['Sofia Ramirez', 3.52], ['Daniel Kim', 3.31], ['Aisha Khan', 3.18], ['Tomas Novak', 3.05],
         ['Grace Lee', 2.88], ['Marcus Johnson', 2.71], ['Elena Petrova', 2.56], ['Noah Williams', 5.34],
         ['Hannah Müller', 4.88], ['Carlos Mendoza', 4.05], ['Yuki Tanaka', 3.62], ['Olivia Brown', 3.40],
         ['Ethan Davis', null, 3], ['Isabella Rossi', null, 2], ['Raj Sharma', null, 4], ['Chloe Martin', null, 2],
@@ -123,7 +123,7 @@ class DemoSeeder extends Seeder
                 $factory = $factory->rated($rating, $id);
             }
 
-            $state = ['name' => $row[0], 'nickname' => $row[3] ?? null];
+            $state = ['name' => $row[0]];
             if (in_array($i, self::SELF_REGISTERED, true)) {
                 $state['self_registered_at'] = now()->subDays(20);
             }

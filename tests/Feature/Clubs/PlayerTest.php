@@ -77,6 +77,38 @@ test('unrated players require manual stars', function () {
         ->and($player->dupr_id)->toBeNull();
 });
 
+test('manual stars use a six-star radio picker, not a dropdown, and the error shows under it', function () {
+    [$user, $club] = memberOf();
+
+    $page = playersPage($user, $club)->call('startAdd');
+
+    foreach (range(1, 6) as $n) {
+        $page->assertSeeHtml('data-test="star-'.$n.'"');
+    }
+    $page->assertSeeHtml('role="radiogroup"')
+        ->assertSeeHtml('aria-label="3 stars"')
+        ->assertDontSeeHtml('data-test="manual-stars"><select')
+        ->assertDontSee('Choose stars')
+        ->set('name', 'Pia')
+        ->call('save')
+        ->assertHasErrors('stars')
+        ->set('stars', '4')
+        ->call('save')
+        ->assertHasNoErrors();
+
+    expect($club->players()->firstOrFail()->stars)->toBe(4);
+});
+
+test('with the DUPR source the picker is hidden and stars are read-only', function () {
+    [$user, $club] = memberOf();
+
+    playersPage($user, $club)
+        ->call('startAdd')
+        ->set('dupr_rating', '4.2')
+        ->assertSeeHtml('data-test="stars-preview"')
+        ->assertDontSeeHtml('data-test="star-3"');
+});
+
 test('a rated player can be switched to manual stars and back', function () {
     [$user, $club] = memberOf();
 
@@ -322,25 +354,20 @@ test('player service handles create and partial update directly', function () {
     expect($player->fresh()->stars)->toBe(1);
 });
 
-test('the player form saves, edits and clears the nickname', function () {
+test('the player form requires a name that is unique in the club, ignoring case', function () {
     [$user, $club] = memberOf();
+    Player::factory()->for($club)->create(['name' => 'Big Dave']);
 
     $page = playersPage($user, $club)
         ->call('startAdd')
-        ->assertSeeHtml('data-test="nickname-input"')
-        ->set('name', 'Nick Test')
-        ->set('nickname', 'Nicky')
+        ->assertSee('Full name or nickname')
+        ->set('name', 'big dave')
         ->set('stars', '3')
         ->call('save')
-        ->assertHasNoErrors();
+        ->assertHasErrors('name');
 
-    $player = $club->players()->firstOrFail();
-    expect($player->nickname)->toBe('Nicky');
-    $page->assertSee('Nick Test')->assertSee('Nicky');
+    $page->set('name', 'Dave')->call('save')->assertHasNoErrors();
+    expect($club->players()->where('name', 'Dave')->exists())->toBeTrue();
 
-    $page->call('startEdit', $player->id)->assertSet('nickname', 'Nicky')->set('nickname', '')->call('save')->assertHasNoErrors();
-    expect($player->fresh()->nickname)->toBeNull();
-
-    Player::factory()->for($club)->create(['nickname' => 'Dup']);
-    playersPage($user, $club)->call('startAdd')->set('name', 'Other')->set('nickname', 'dup')->set('stars', '3')->call('save')->assertHasErrors('nickname');
+    $page->call('startAdd')->set('name', '')->set('stars', '3')->call('save')->assertHasErrors('name');
 });

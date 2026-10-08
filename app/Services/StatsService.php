@@ -155,7 +155,7 @@ class StatsService
     private function buildPublicEndedSession(PlaySession $session): array
     {
         $standings = $this->sessionStandings($session);
-        $matchPlayers = $this->matchPlayerNames($session, includeVoid: false, public: true);
+        $matchPlayers = $this->matchPlayerNames($session, includeVoid: false);
 
         $log = [];
         foreach ($this->logRows($session, false, $matchPlayers) as $row) {
@@ -186,7 +186,7 @@ class StatsService
      */
     public function matchLog(PlaySession $session, bool $includeVoid = false): array
     {
-        return $this->logRows($session, $includeVoid, $this->matchPlayerNames($session, $includeVoid, public: false));
+        return $this->logRows($session, $includeVoid, $this->matchPlayerNames($session, $includeVoid));
     }
 
     // ----------------------------------------------------------------- profile
@@ -369,8 +369,8 @@ class StatsService
             ->whereNotNull('m.team_a_score')
             ->whereNotNull('m.team_b_score')
             ->when($activeOnly, fn (Builder $q) => $q->where('p.active', true))
-            ->groupBy('p.id', 'p.name', 'p.nickname')
-            ->selectRaw('p.id as player_id, p.name as player_name, p.nickname as player_nickname, count(*) as played')
+            ->groupBy('p.id', 'p.name')
+            ->selectRaw('p.id as player_id, p.name as player_name, count(*) as played')
             ->selectRaw("sum(case when {$won} then 1 else 0 end) as wins")
             ->selectRaw("sum(case when mp.team = 'A' then m.team_a_score else m.team_b_score end) as points_for")
             ->selectRaw("sum(case when mp.team = 'A' then m.team_b_score else m.team_a_score end) as points_against");
@@ -379,7 +379,7 @@ class StatsService
 
         $rows = [];
         foreach ($query->get() as $r) {
-            $rows[] = new StatRow((int) $r->player_id, (string) $r->player_name, (int) $r->played, (int) $r->wins, (int) $r->points_for, (int) $r->points_against, $r->player_nickname === null ? null : (string) $r->player_nickname);
+            $rows[] = new StatRow((int) $r->player_id, (string) $r->player_name, (int) $r->played, (int) $r->wins, (int) $r->points_for, (int) $r->points_against);
         }
 
         return $rows;
@@ -470,11 +470,11 @@ class StatsService
     }
 
     /**
-     * Team members per match, by slot, with staff (full) or public names.
+     * Team members per match, by slot, with names as entered.
      *
      * @return array<int, array{A: list<string>, B: list<string>}>
      */
-    private function matchPlayerNames(PlaySession $session, bool $includeVoid, bool $public): array
+    private function matchPlayerNames(PlaySession $session, bool $includeVoid): array
     {
         $statuses = $includeVoid ? [MatchStatus::Done->value, MatchStatus::Void->value] : [MatchStatus::Done->value];
 
@@ -485,11 +485,11 @@ class StatsService
             ->where('p.club_id', $session->club_id)
             ->whereIn('m.status', $statuses)
             ->orderBy('mp.match_id')->orderBy('mp.team')->orderBy('mp.slot')
-            ->get(['mp.match_id', 'mp.team', 'p.name', 'p.nickname']);
+            ->get(['mp.match_id', 'mp.team', 'p.name']);
 
         $out = [];
         foreach ($rows as $r) {
-            $name = $public ? (new Player(['name' => $r->name, 'nickname' => $r->nickname]))->publicName() : (string) $r->name;
+            $name = (string) $r->name;
             $out[(int) $r->match_id] ??= ['A' => [], 'B' => []];
             $out[(int) $r->match_id][(string) $r->team === 'B' ? 'B' : 'A'][] = $name;
         }
@@ -543,8 +543,8 @@ class StatsService
     {
         $map = [];
         foreach (array_chunk(array_values(array_unique($ids)), 500) as $chunk) {
-            foreach (Player::query()->whereIn('id', $chunk)->get(['id', 'public_id', 'name', 'nickname']) as $p) {
-                $map[(int) $p->id] = ['public_id' => (string) $p->public_id, 'name' => $p->publicName()];
+            foreach (Player::query()->whereIn('id', $chunk)->get(['id', 'public_id', 'name']) as $p) {
+                $map[(int) $p->id] = ['public_id' => (string) $p->public_id, 'name' => $p->name];
             }
         }
 

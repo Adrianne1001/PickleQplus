@@ -23,7 +23,7 @@ class PlayerFactory extends Factory
     {
         return [
             'club_id' => Club::factory(),
-            'name' => fake()->name(),
+            'name' => fake()->unique()->name(),
             'dupr_id' => null,
             'dupr_rating' => null,
             'stars' => fake()->numberBetween(1, 6),

@@ -153,7 +153,6 @@ test('a balanced session shows no markers, labels or flags', function () {
 
 test('the tv and public queue show the mode label and no gender', function () {
     [$session] = uiMixedBoard('MMWWMWNN');
-    Player::query()->update(['nickname' => null]);
 
     foreach ([Tv::class, Queue::class] as $page) {
         $params = $page === Tv::class ? ['club' => $session->club, 'tvId' => $session->tv_id] : ['club' => $session->club, 'publicId' => $session->public_id];

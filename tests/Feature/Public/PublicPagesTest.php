@@ -11,7 +11,7 @@ use Livewire\Livewire;
 
 /**
  * A club with a session in the given status. For live sessions, six players
- * with nicknames are checked in (so one match is staged and one is playing).
+ * are checked in (so one match is staged and one is playing).
  *
  * @return array{0: Club, 1: PlaySession, 2: list<Player>}
  */
@@ -22,7 +22,7 @@ function publicSession(SessionStatus $status = SessionStatus::Live, int $courts 
     $list = [];
     if ($status === SessionStatus::Live) {
         for ($i = 1; $i <= $players; $i++) {
-            $player = Player::factory()->for($club)->manual(3)->create(['name' => "Secretname{$i} Lastfull{$i}", 'nickname' => "Nick{$i}", 'dupr_id' => 'DQ'.str_repeat((string) $i, 4), 'dupr_rating' => 4.25]);
+            $player = Player::factory()->for($club)->manual(3)->create(['name' => "Player{$i}", 'dupr_id' => 'DQ'.str_repeat((string) $i, 4), 'dupr_rating' => 4.25]);
             app(CheckInService::class)->checkIn($session, $player);
             $list[] = $player;
         }
@@ -65,14 +65,13 @@ test('the queue page never shows or links to the tv url', function () {
     $this->get(publicUrl($club, $session))->assertDontSee($session->tv_id)->assertDontSee('/tv')->assertDontSee($session->checkin_token);
 });
 
-test('public pages need no login and never show full names, DUPR data or integer ids', function (string $page) {
+test('public pages need no login and show names as entered, never DUPR data or integer ids', function (string $page) {
     [$club, $session, $players] = publicSession();
 
     $url = $page === 'tv' ? tvUrl($club, $session) : publicUrl($club, $session);
     $response = $this->get($url)->assertOk();
-    $response->assertSee('Nick1');
     foreach ($players as $player) {
-        $response->assertDontSee($player->name)->assertDontSee('Secretname')->assertDontSee((string) $player->dupr_id)->assertDontSee('4.25');
+        $response->assertSee($player->name)->assertDontSee((string) $player->dupr_id)->assertDontSee('4.25');
     }
     expect($response->getContent())->not->toMatch('/data-player-id="\d{1,4}"/');
 })->with(['queue', 'tv']);
@@ -107,7 +106,7 @@ test('the queue page sends only ids, never names, in the live state', function (
 
     expect($live['status'])->toBe('live')
         ->and($live['players'])->toHaveCount(6)
-        ->and(json_encode($live))->not->toContain('Secretname');
+        ->and(json_encode($live))->not->toContain('Player1');
 });
 
 test('draft, live and ended states render', function () {

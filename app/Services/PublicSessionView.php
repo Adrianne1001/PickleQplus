@@ -9,8 +9,8 @@ use App\Models\PlaySession;
 use App\Models\SessionPlayer;
 
 /**
- * Read model for the public queue page and the TV. Exposes only public names
- * (nickname, else first name + last initial) and player ids: never full names,
+ * Read model for the public queue page and the TV. Exposes only player names
+ * (shown exactly as entered: a full name or a nickname, the player's choice) and public player ids: never
  * stars, DUPR data or match ids. Board ordering and wait estimates come from
  * SessionBoard.
  *
@@ -53,10 +53,10 @@ class PublicSessionView
         $names = [];
         $roster = Player::query()
             ->whereIn('id', SessionPlayer::query()->select('player_id')->where('play_session_id', $session->id))
-            ->get(['id', 'public_id', 'name', 'nickname']);
+            ->get(['id', 'public_id', 'name']);
         $pub = [];
         foreach ($roster as $player) {
-            $names[$player->id] = $player->publicName();
+            $names[$player->id] = $player->name;
             $pub[$player->id] = (string) $player->public_id;
         }
         $publicName = fn (int $id): string => $names[$id] ?? '';
