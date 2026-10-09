@@ -33,6 +33,7 @@
         ['name' => 'Balanced', 'text' => 'The default. Fewest games first, then longest wait, with teams split for an even match.', 'ready' => true],
         ['name' => 'Mixed doubles', 'text' => 'Every team is one man and one woman. If the queue does not have the right mix, the slot waits.', 'ready' => true],
         ['name' => 'Skill courts', 'text' => 'Split courts into star-rated groups so players meet others at their level, each with its own queue.', 'ready' => true],
+        ['name' => 'Social mix', 'text' => 'Rotates partners before repeating, then spreads opponents as fairly as possible. Ratings aren\'t used.', 'ready' => true],
         ['name' => 'Winners stay', 'text' => 'Winners hold the court for a set number of wins while challengers come from the queue.', 'ready' => false],
         ['name' => 'King of the Court', 'text' => 'A rolling ladder: winners move up a court, losers move down.', 'ready' => false],
     ];

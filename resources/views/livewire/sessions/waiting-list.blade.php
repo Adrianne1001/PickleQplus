@@ -4,6 +4,9 @@
         @if ($mixed)
             <flux:badge color="purple" size="sm" data-test="mode-label">{{ __('Mixed doubles') }}</flux:badge>
         @endif
+        @if ($social)
+            <flux:badge color="sky" size="sm" data-test="mode-label" title="{{ __('Stars are ignored') }}">{{ __('Social mix') }}</flux:badge>
+        @endif
     </div>
 
     @if ($errors->any())

@@ -51,6 +51,7 @@
                             'mixed' => __('Every team is 1 man + 1 woman. Up Next waits until 2 of each are free.'),
                             'balanced' => __('Fair rotation: fewest games first, mixing partners and opponents.'),
                             'skill_courts' => __('Courts only take matches from their own group, even when idle.'),
+                            'social' => __('Rotates partners before repeating, then spreads opponents as fairly as possible. Ratings aren\'t used.'),
                             default => '',
                         } }}
                     </flux:text>

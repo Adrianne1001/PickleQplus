@@ -50,7 +50,8 @@ it('lists players with games and wins at the bottom and shows no wins badge else
 
     // The only wins text is inside the Players section.
     $beforePlayers = substr($html, 0, strpos($html, 'data-test="queue-players"'));
-    expect($beforePlayers)->not->toContain('player-wins')->not->toContain('2W');
+    expect($beforePlayers)->not->toContain('data-test="player-wins"');
+    expect(preg_match('/>\s*\d+ wins?\s*</', $beforePlayers))->toBe(0);
     expect(strpos($html, 'data-test="queue-players"'))->toBeGreaterThan(strpos($html, 'data-test="queue-waiting"'));
 });
 

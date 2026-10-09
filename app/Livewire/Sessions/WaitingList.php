@@ -37,6 +37,7 @@ class WaitingList extends Component
             'waiting' => $waiting,
             'onBreak' => $board->onBreak($this->session, $wins),
             'mixed' => $board->mode($this->session) === 'mixed',
+            'social' => $board->mode($this->session) === 'social',
             'unplaceable' => $board->unplaceableIn($waiting),
             'groups' => $board->groups($this->session, $waiting),
         ]);

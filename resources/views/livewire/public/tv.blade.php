@@ -51,6 +51,9 @@
             @if (($data['mode'] ?? 'balanced') === 'mixed')
                 <span class="rounded-full border border-purple-400 px-4 py-1 text-xl font-semibold text-purple-200" data-test="mode-label">{{ __('Mixed doubles') }}</span>
             @endif
+            @if (($data['mode'] ?? 'balanced') === 'social')
+                <span class="rounded-full border border-sky-400 px-4 py-1 text-xl font-semibold text-sky-200" data-test="mode-label">{{ __('Social mix') }}</span>
+            @endif
             @if ($live)
                 <span class="inline-flex items-center gap-2 rounded-full bg-brand-700 px-5 py-1.5 text-2xl font-bold text-white"><span class="size-3 animate-pulse rounded-full bg-ball" aria-hidden="true"></span>{{ __('Live') }}</span>
             @endif

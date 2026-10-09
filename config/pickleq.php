@@ -68,12 +68,20 @@ return [
         'window' => 8,
         'avg_match_minutes' => 15,
         'winners_stay_max_wins' => 2,
+
+        // Social mix (P7.4g): the balanced flow ignoring stars, partner repeats weigh
+        // heavily, then opponents are spread. Shares `window` and queue priority.
+        'social' => [
+            'repeat_partner' => 6,
+            'repeat_opponent' => 2,
+            'skipped_priority' => 2,
+        ],
     ],
 
     /*
     | Rotation modes a session may currently be set to (P7.4). Each later
     | P7.4 item adds its mode here when it lands.
     */
-    'rotation_modes_enabled' => ['balanced', 'mixed', 'skill_courts'],
+    'rotation_modes_enabled' => ['balanced', 'mixed', 'skill_courts', 'social'],
 
 ];

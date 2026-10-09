@@ -43,10 +43,18 @@ final class BalancedRotationEngine implements RotationEngine
                         $ids = array_map(static fn (Candidate $c): int => $c->id, $group);
                         [$a, $b, $c, $d] = $group;
 
+                        $splits = [];
                         foreach ([[[$a, $b], [$c, $d]], [[$a, $c], [$b, $d]], [[$a, $d], [$b, $c]]] as [$teamA, $teamB]) {
                             $breakdown = $this->matchCost->breakdown($teamA, $teamB, $skipped, $history);
-                            $cost = array_sum($breakdown);
+                            $splits[] = [$teamA, $teamB, $breakdown, array_sum($breakdown), $this->repeatPartners($teamA, $teamB, $history)];
+                        }
 
+                        if ($this->weights->partnersFirst) {
+                            $fewest = min(array_column($splits, 4));
+                            $splits = array_filter($splits, static fn (array $split): bool => $split[4] === $fewest);
+                        }
+
+                        foreach ($splits as [$teamA, $teamB, $breakdown, $cost]) {
                             if ($best === null || $this->matchCost->isBetter($cost, $skipped, $ids, $best->cost, $bestSkipped, $bestIds)) {
                                 $best = new MatchResult(
                                     [$teamA[0]->id, $teamA[1]->id],
@@ -64,6 +72,15 @@ final class BalancedRotationEngine implements RotationEngine
         }
 
         return $best;
+    }
+
+    /**
+     * @param  array<Candidate>  $teamA
+     * @param  array<Candidate>  $teamB
+     */
+    private function repeatPartners(array $teamA, array $teamB, PairHistory $history): int
+    {
+        return $history->partnerCount($teamA[0]->id, $teamA[1]->id) + $history->partnerCount($teamB[0]->id, $teamB[1]->id);
     }
 
     public function pickReplacement(array $teamA, array $teamB, array $candidates, PairHistory $history): ?ReplacementResult

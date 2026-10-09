@@ -104,6 +104,9 @@
             @if (($data['mode'] ?? 'balanced') === 'skill_courts')
                 <span class="inline-block rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-900 dark:bg-amber-900 dark:text-amber-100" data-test="mode-label">{{ __('Skill courts') }}</span>
             @endif
+            @if (($data['mode'] ?? 'balanced') === 'social')
+                <span class="inline-block rounded-full bg-sky-100 px-3 py-1 text-xs font-semibold text-sky-900 dark:bg-sky-900 dark:text-sky-100" data-test="mode-label">{{ __('Social mix') }}</span>
+            @endif
         </div>
         @if ($data['status'] === 'draft')
             <p class="text-zinc-600 dark:text-zinc-400">{{ __('Not started yet. Check back soon.') }}</p>

@@ -7,6 +7,7 @@ enum RotationMode: string
     case Balanced = 'balanced';
     case Mixed = 'mixed';
     case SkillCourts = 'skill_courts';
+    case Social = 'social';
     case WinnersStay = 'winners_stay';
     case KingOfCourt = 'king_of_court';
 
@@ -29,6 +30,7 @@ enum RotationMode: string
             self::Balanced => 'Balanced',
             self::Mixed => 'Mixed doubles',
             self::SkillCourts => 'Skill courts',
+            self::Social => 'Social mix',
             self::WinnersStay => 'Winners stay',
             self::KingOfCourt => 'King of the Court',
         };

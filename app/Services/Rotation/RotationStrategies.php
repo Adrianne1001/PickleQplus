@@ -32,6 +32,7 @@ final class RotationStrategies
             RotationMode::Balanced => new BalancedStrategy(self::balancedEngine()),
             RotationMode::Mixed => new MixedStrategy(self::mixedEngine(), self::balancedEngine()),
             RotationMode::SkillCourts => new SkillCourtsStrategy(self::balancedEngine()),
+            RotationMode::Social => new BalancedStrategy(self::socialEngine()),
             default => throw new \LogicException("Rotation mode {$session->rotation_mode->value} is not implemented yet."),
         };
     }
@@ -42,6 +43,14 @@ final class RotationStrategies
         $config = (array) config('pickleq.rotation', []);
 
         return new MixedRotationEngine(Weights::fromConfig($config));
+    }
+
+    private static function socialEngine(): BalancedRotationEngine
+    {
+        /** @var array<string, mixed> $config */
+        $config = (array) config('pickleq.rotation', []);
+
+        return new BalancedRotationEngine(Weights::socialFromConfig($config));
     }
 
     private static function balancedEngine(): BalancedRotationEngine
