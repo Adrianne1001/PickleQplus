@@ -41,6 +41,15 @@
                     @endforelse
                 </ul>
             @endif
+
+            <x-quick-add-player
+                :open="$quickOpen"
+                :term="trim($search)"
+                :show="$quickAdd['show']"
+                :deactivated="$quickAdd['deactivated']"
+                :roster="route('clubs.players.index', $session->club)"
+                action="saveQuick"
+            />
         </div>
     @endunless
 

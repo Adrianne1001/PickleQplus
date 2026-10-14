@@ -7,6 +7,7 @@ use App\Enums\RatingSource;
 use App\Rules\DuprPlayerId;
 use Database\Factories\PlayerFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -61,13 +62,26 @@ class Player extends Model
     }
 
     /**
+     * Match a name the way the unique index does: MySQL's plain `=` uses the column
+     * collation (case and accent insensitive); `lower()` covers SQLite (ASCII case).
+     *
+     * @param  Builder<Player>  $query
+     */
+    public function scopeWhereNameMatches(Builder $query, string $name): void
+    {
+        $trimmed = trim($name);
+
+        $query->where(fn ($q) => $q->where('name', $trimmed)->orWhereRaw('lower(name) = ?', [mb_strtolower($trimmed)]));
+    }
+
+    /**
      * Case-insensitive name check within a club.
      */
     public static function nameTaken(int $clubId, string $name, ?int $ignoreId = null): bool
     {
         return self::query()
             ->where('club_id', $clubId)
-            ->whereRaw('lower(name) = ?', [mb_strtolower(trim($name))])
+            ->whereNameMatches($name)
             ->when($ignoreId !== null, fn ($q) => $q->whereKeyNot($ignoreId))
             ->exists();
     }

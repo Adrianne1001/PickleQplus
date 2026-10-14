@@ -120,6 +120,104 @@
             </div>
         </x-card>
 
+        @unless ($ended)
+            @php
+                $toCheckIn = $this->picked->count() + count($newPlayers);
+            @endphp
+            <x-card :title="__('Players')" :description="$session ? __('Check in more players now. Everyone is checked in when you save.') : __('Optionally check players in now. Everyone is checked in when you save.')" data-test="players-section">
+                <div class="space-y-4">
+                    <flux:input
+                        wire:model.live.debounce.250ms="search"
+                        type="search"
+                        icon="magnifying-glass"
+                        :label="__('Find a player')"
+                        :placeholder="__('Start typing a name')"
+                        autocomplete="off"
+                        wire:keydown.enter.prevent data-test="player-search"
+                    />
+
+                    @if (trim($search) !== '')
+                        <ul class="divide-y divide-zinc-200 overflow-hidden rounded-xl border border-zinc-200 dark:divide-zinc-700 dark:border-zinc-700" data-test="player-results">
+                            @forelse ($this->results as $player)
+                                <li class="flex items-center justify-between gap-3 px-4 py-2" wire:key="result-{{ $player->id }}">
+                                    <span class="flex min-w-0 flex-wrap items-center gap-x-2">
+                                        <span class="break-words font-medium text-zinc-900 dark:text-white">{{ $player->name }}</span>
+                                        <x-star-rating :stars="$player->stars" />
+                                    </span>
+                                    <flux:button type="button" size="sm" variant="primary" class="min-h-11 shrink-0" wire:click="pick({{ $player->id }})" data-test="pick-player">{{ __('Add') }}</flux:button>
+                                </li>
+                            @empty
+                                <li class="px-4 py-3 text-sm text-zinc-600 dark:text-zinc-400">{{ __('No matching active players left to add.') }}</li>
+                            @endforelse
+                        </ul>
+                    @endif
+
+                    <x-quick-add-player
+                        :open="$quickOpen"
+                        :term="trim($search)"
+                        :show="$quickAdd['show']"
+                        :deactivated="$quickAdd['deactivated']"
+                        :roster="route('clubs.players.index', $club)"
+                        action="addQuick"
+                        :submit-label="__('Add to list')"
+                    />
+
+                    <flux:error name="players" />
+
+                    <div class="space-y-2" data-test="to-check-in">
+                        <flux:heading size="sm">{{ __('To check in (:count)', ['count' => $toCheckIn]) }}</flux:heading>
+                        @if ($toCheckIn === 0)
+                            <flux:text class="text-sm">{{ __('Nobody picked yet. Search above to add players.') }}</flux:text>
+                        @else
+                            <ul class="space-y-2">
+                                @foreach ($this->picked as $player)
+                                    <li class="flex items-center justify-between gap-2 rounded-xl bg-zinc-100 py-1 pl-3 pr-1 dark:bg-zinc-800" wire:key="picked-{{ $player->id }}" data-test="picked-chip">
+                                        <span class="flex min-w-0 flex-wrap items-center gap-x-2">
+                                            <span class="break-words font-medium text-zinc-900 dark:text-white">{{ $player->name }}</span>
+                                            <x-star-rating :stars="$player->stars" />
+                                        </span>
+                                        <flux:button type="button" size="sm" variant="ghost" class="min-h-11 shrink-0" wire:click="unpick({{ $player->id }})" aria-label="{{ __('Remove :name', ['name' => $player->name]) }}">{{ __('Remove') }}</flux:button>
+                                    </li>
+                                @endforeach
+                                @foreach ($newPlayers as $i => $pending)
+                                    @php
+                                        $chipErrors = collect(['name', 'stars', 'dupr_id', 'gender'])->map(fn ($k) => $errors->first("new_players.{$i}.{$k}"))->filter()->all();
+                                    @endphp
+                                    <li class="rounded-xl bg-zinc-100 py-1 pl-3 pr-1 dark:bg-zinc-800 {{ $chipErrors ? 'ring-2 ring-red-600 dark:ring-red-400' : '' }}" wire:key="new-{{ $i }}-{{ $pending['name'] }}" data-test="new-chip">
+                                        <div class="flex items-center justify-between gap-2">
+                                            <span class="flex min-w-0 flex-wrap items-center gap-x-2">
+                                                <span class="break-words font-medium text-zinc-900 dark:text-white">{{ $pending['name'] }}</span>
+                                                <x-star-rating :stars="$pending['stars']" />
+                                                <flux:badge size="sm" color="purple">{{ __('new') }}</flux:badge>
+                                            </span>
+                                            <flux:button type="button" size="sm" variant="ghost" class="min-h-11 shrink-0" wire:click="removeNew({{ $i }})" aria-label="{{ __('Remove :name', ['name' => $pending['name']]) }}">{{ __('Remove') }}</flux:button>
+                                        </div>
+                                        @foreach ($chipErrors as $message)
+                                            <p class="pb-2 pr-3 text-sm font-medium text-red-700 dark:text-red-400" data-test="chip-error">{{ $message }}</p>
+                                        @endforeach
+                                    </li>
+                                @endforeach
+                            </ul>
+                        @endif
+                    </div>
+
+                    @if ($session)
+                        <div class="space-y-2 border-t border-zinc-200 pt-4 dark:border-zinc-700" data-test="already-checked-in">
+                            <flux:heading size="sm">{{ __('Already checked in (:count)', ['count' => $this->checkedIn->count()]) }}</flux:heading>
+                            <flux:text class="text-sm">{{ __('These players are managed on the session board.') }}</flux:text>
+                            @if ($this->checkedIn->isNotEmpty())
+                                <ul class="flex flex-wrap gap-2">
+                                    @foreach ($this->checkedIn as $entry)
+                                        <li class="rounded-full bg-zinc-100 px-3 py-1 text-sm text-zinc-800 dark:bg-zinc-800 dark:text-zinc-200" wire:key="in-{{ $entry->id }}">{{ $entry->player->name }}</li>
+                                    @endforeach
+                                </ul>
+                            @endif
+                        </div>
+                    @endif
+                </div>
+            </x-card>
+        @endunless
+
         <div class="flex flex-wrap gap-3">
             @unless ($ended)
                 <flux:button variant="primary" type="submit" class="min-h-11" data-test="save-session-button">{{ __('Save session') }}</flux:button>

@@ -2,9 +2,11 @@
 
 namespace App\Services;
 
+use App\Concerns\PlayerValidationRules;
 use App\Enums\Gender;
 use App\Enums\LateArrivalPolicy;
 use App\Enums\MatchStatus;
+use App\Enums\RatingSource;
 use App\Enums\RotationMode;
 use App\Enums\SessionPlayerStatus;
 use App\Enums\SessionStatus;
@@ -16,9 +18,11 @@ use App\Models\Player;
 use App\Models\PlaySession;
 use App\Models\SessionPlayer;
 use App\Models\User;
+use App\Rules\DuprPlayerId;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
 
 /**
@@ -29,8 +33,86 @@ use Illuminate\Validation\ValidationException;
 class CheckInService
 {
     use LocksPlaySession;
+    use PlayerValidationRules;
 
-    public function __construct(private readonly MatchService $matches) {}
+    public function __construct(private readonly MatchService $matches, private readonly PlayerService $players) {}
+
+    /**
+     * The club player whose trimmed name equals $name, case-insensitively (the same match
+     * as Player::nameTaken and the unique index), active or not. Check ->active on the result.
+     */
+    public function findPlayerByName(Club $club, string $name): ?Player
+    {
+        return Player::query()
+            ->where('club_id', $club->id)
+            ->whereNameMatches($name)
+            ->first();
+    }
+
+    /**
+     * Create a new club player and check them in, in one transaction, while the
+     * session is draft or live. Error keys: name, stars, dupr_id, gender, session.
+     *
+     * @param  array{name?: mixed, stars?: mixed, dupr_id?: mixed, gender?: mixed}  $data
+     *
+     * @throws ValidationException
+     */
+    public function addNewPlayer(PlaySession $session, array $data): SessionPlayer
+    {
+        return DB::transaction(function () use ($session, $data): SessionPlayer {
+            // Lock order club -> session, as PlaySessionService::start().
+            $club = Club::query()->whereKey($session->club_id)->lockForUpdate()->firstOrFail();
+            $this->lockSession($session);
+            $this->guardOpen($session);
+
+            $player = $this->createQuickPlayer($club, $data);
+
+            return $this->checkIn($session, $player);
+        });
+    }
+
+    /**
+     * Validate and create a manual-rating staff player (no self-registration fields).
+     * Error keys are prefixed with $prefix (e.g. "new_players.0.").
+     *
+     * @param  array{name?: mixed, stars?: mixed, dupr_id?: mixed, gender?: mixed}  $data
+     *
+     * @throws ValidationException
+     */
+    public function createQuickPlayer(Club $club, array $data, string $prefix = ''): Player
+    {
+        $input = [
+            'name' => is_string($data['name'] ?? null) ? trim($data['name']) : ($data['name'] ?? null),
+            'stars' => $data['stars'] ?? null,
+            'rating_source' => RatingSource::Manual->value,
+        ];
+        if (array_key_exists('dupr_id', $data)) {
+            $input['dupr_id'] = DuprPlayerId::normalize($data['dupr_id']);
+        }
+        if (array_key_exists('gender', $data)) {
+            $input['gender'] = $data['gender'] === '' ? null : $data['gender'];
+        }
+
+        try {
+            $rules = array_intersect_key($this->playerRules($club, null, $input), array_flip(['name', 'stars', 'dupr_id', 'gender']));
+            $valid = Validator::make($input, $rules)->validate();
+
+            return $this->players->create($club, [
+                'name' => (string) $valid['name'],
+                'stars' => (int) $valid['stars'],
+                'dupr_id' => isset($valid['dupr_id']) ? (string) $valid['dupr_id'] : null,
+                'gender' => isset($valid['gender']) ? (string) $valid['gender'] : null,
+                'rating_source' => RatingSource::Manual->value,
+            ]);
+        } catch (ValidationException $e) {
+            $errors = [];
+            foreach ($e->errors() as $key => $messages) {
+                $errors[$prefix.$key] = $messages;
+            }
+
+            throw ValidationException::withMessages($errors);
+        }
+    }
 
     /**
      * Check an active club player in (draft or live). A player already in the

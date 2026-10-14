@@ -3,6 +3,8 @@
 namespace App\Livewire\Sessions;
 
 use App\Enums\SessionPlayerStatus;
+use App\Livewire\Sessions\Concerns\QuickAddsPlayer;
+use App\Models\Club;
 use App\Models\Player;
 use App\Models\PlaySession;
 use App\Models\SessionPlayer;
@@ -23,6 +25,8 @@ use Livewire\Component;
  */
 class CheckInPanel extends Component
 {
+    use QuickAddsPlayer;
+
     #[Locked]
     public PlaySession $session;
 
@@ -48,6 +52,27 @@ class CheckInPanel extends Component
 
         $checkIns->checkIn($this->session, $this->player($playerId));
         $this->search = '';
+    }
+
+    /** Create the player from the inline form and check them in, in one transaction. */
+    public function saveQuick(CheckInService $checkIns): void
+    {
+        $this->authorize('manage', $this->session);
+        $this->authorize('create', [Player::class, $this->quickClub()]);
+
+        try {
+            $checkIns->addNewPlayer($this->session, $this->quickInput());
+        } catch (ValidationException $e) {
+            throw $this->prefixed($e);
+        }
+
+        $this->search = '';
+        $this->closeQuickAdd();
+    }
+
+    protected function quickClub(): Club
+    {
+        return $this->session->club()->firstOrFail();
     }
 
     public function checkOut(CheckInService $checkIns, int $playerId): void
@@ -144,6 +169,7 @@ class CheckInPanel extends Component
     {
         return view('livewire.sessions.check-in-panel', [
             'wins' => app(SessionBoard::class)->winsByPlayer($this->session),
+            'quickAdd' => $this->session->isEnded() ? ['show' => false, 'deactivated' => null] : $this->quickAddState(),
         ]);
     }
 

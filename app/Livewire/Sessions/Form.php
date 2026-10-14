@@ -4,10 +4,18 @@ namespace App\Livewire\Sessions;
 
 use App\Domain\Rotation\SkillGroups;
 use App\Enums\RotationMode;
+use App\Enums\SessionPlayerStatus;
+use App\Livewire\Sessions\Concerns\QuickAddsPlayer;
 use App\Models\Club;
+use App\Models\Player;
 use App\Models\PlaySession;
+use App\Models\SessionPlayer;
 use App\Services\PlaySessionService;
+use App\Services\SessionFormService;
 use Illuminate\Contracts\View\View;
+use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Validation\ValidationException;
+use Livewire\Attributes\Computed;
 use Livewire\Attributes\Locked;
 use Livewire\Attributes\Title;
 use Livewire\Component;
@@ -15,6 +23,8 @@ use Livewire\Component;
 #[Title('Session')]
 class Form extends Component
 {
+    use QuickAddsPlayer;
+
     #[Locked]
     public Club $club;
 
@@ -47,6 +57,25 @@ class Form extends Component
 
     /** True while waiting for the organizer to confirm a mode change on a live session. */
     public bool $confirmingMode = false;
+
+    /** Player search for the Players section. */
+    public string $search = '';
+
+    /**
+     * Existing club players to check in on Save. Locked: only pick() may add ids, and it checks the club.
+     *
+     * @var list<int>
+     */
+    #[Locked]
+    public array $pickedIds = [];
+
+    /**
+     * Players to create and check in on Save.
+     *
+     * @var list<array{name: string, stars: int, dupr_id: ?string, gender: string}>
+     */
+    #[Locked]
+    public array $newPlayers = [];
 
     public function mount(Club $club, ?PlaySession $session = null): void
     {
@@ -200,15 +229,151 @@ class Form extends Component
         }
         $this->confirmingMode = false;
 
-        if ($this->session === null) {
-            $this->authorize('create', [PlaySession::class, $this->club]);
-            $session = $sessions->create($this->club, $data);
-        } else {
-            $this->authorize('update', $this->session);
-            $session = $sessions->update($this->session, $data);
+        if ($this->newPlayers !== []) {
+            $this->authorize('create', [Player::class, $this->club]);
         }
+        $this->authorize($this->session === null ? 'create' : 'update', $this->session ?? [PlaySession::class, $this->club]);
+        $session = app(SessionFormService::class)->save($this->club, $this->session, $data, $this->pickedIds, $this->newPlayers);
 
         $this->redirectRoute('clubs.sessions.show', [$this->club, $session], navigate: true);
+    }
+
+    public function updatedSearch(): void
+    {
+        $this->quickOpen = false;
+    }
+
+    /** Add an existing active club player to the "To check in" list. */
+    public function pick(int $playerId): void
+    {
+        $this->authorizePlayers();
+
+        $player = $this->club->players()->where('active', true)->find($playerId);
+        if ($player === null || in_array($playerId, $this->checkedInIds(), true)) {
+            throw ValidationException::withMessages(['players' => __('That player is not available to check in. Search again.')]);
+        }
+
+        if (! in_array($playerId, $this->pickedIds, true)) {
+            $this->pickedIds[] = $playerId;
+        }
+        $this->search = '';
+        $this->resetErrorBag('players');
+    }
+
+    public function unpick(int $playerId): void
+    {
+        $this->pickedIds = array_values(array_diff($this->pickedIds, [$playerId]));
+    }
+
+    /** Add the inline form's player to the pending list. Nothing is created until Save. */
+    public function addQuick(): void
+    {
+        $this->authorizePlayers();
+        $this->authorize('create', [Player::class, $this->club]);
+
+        $input = $this->validatedQuick();
+
+        foreach ($this->newPlayers as $pending) {
+            if (mb_strtolower($pending['name']) === mb_strtolower($input['name'])) {
+                throw ValidationException::withMessages(['quick.name' => __('You already added a new player with that name.')]);
+            }
+        }
+
+        $this->newPlayers[] = [
+            'name' => $input['name'],
+            'stars' => (int) $input['stars'],
+            'dupr_id' => $input['dupr_id'],
+            'gender' => $input['gender'],
+        ];
+        $this->search = '';
+        $this->closeQuickAdd();
+    }
+
+    public function removeNew(int $index): void
+    {
+        $pending = $this->newPlayers;
+        unset($pending[$index]);
+        $this->newPlayers = array_values($pending);
+        $this->resetErrorBag(['new_players', 'players']);
+    }
+
+    protected function quickClub(): Club
+    {
+        return $this->club;
+    }
+
+    private function authorizePlayers(): void
+    {
+        abort_if($this->session?->isEnded() ?? false, 403);
+        $this->authorize($this->session === null ? 'create' : 'update', $this->session ?? [PlaySession::class, $this->club]);
+    }
+
+    /** @return list<int> */
+    private function checkedInIds(): array
+    {
+        if ($this->session === null) {
+            return [];
+        }
+
+        return array_values($this->session->sessionPlayers()
+            ->where('status', '!=', SessionPlayerStatus::Left->value)
+            ->pluck('player_id')
+            ->map(fn ($id): int => (int) $id)
+            ->all());
+    }
+
+    /**
+     * Active club players matching the search, leaving out anyone checked in or picked.
+     *
+     * @return Collection<int, Player>
+     */
+    #[Computed]
+    public function results(): Collection
+    {
+        $term = trim($this->search);
+        if ($term === '') {
+            return new Collection;
+        }
+
+        return $this->club->players()
+            ->where('active', true)
+            ->where('name', 'like', '%'.addcslashes($term, '\%_').'%')
+            ->whereNotIn('id', array_merge($this->checkedInIds(), $this->pickedIds))
+            ->orderBy('name')
+            ->orderBy('id')
+            ->limit(8)
+            ->get();
+    }
+
+    /**
+     * @return Collection<int, Player>
+     */
+    #[Computed]
+    public function picked(): Collection
+    {
+        if ($this->pickedIds === []) {
+            return new Collection;
+        }
+
+        return $this->club->players()->whereIn('id', $this->pickedIds)->orderBy('name')->get();
+    }
+
+    /**
+     * @return Collection<int, SessionPlayer>
+     */
+    #[Computed]
+    public function checkedIn(): Collection
+    {
+        if ($this->session === null) {
+            return new Collection;
+        }
+
+        return $this->session->sessionPlayers()
+            ->where('status', '!=', SessionPlayerStatus::Left->value)
+            ->with('player')
+            ->orderBy('checked_in_at')
+            ->orderBy('id')
+            ->get();
     }
 
     public function cancelModeChange(): void
@@ -218,6 +383,11 @@ class Form extends Component
 
     public function render(): View
     {
-        return view('livewire.sessions.form', ['modes' => RotationMode::selectable()]);
+        $ended = $this->session?->isEnded() ?? false;
+
+        return view('livewire.sessions.form', [
+            'modes' => RotationMode::selectable(),
+            'quickAdd' => $ended ? ['show' => false, 'deactivated' => null] : $this->quickAddState(),
+        ]);
     }
 }
