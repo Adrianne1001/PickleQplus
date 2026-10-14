@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\ClubRole;
 use Database\Factories\UserFactory;
+use Illuminate\Auth\Notifications\VerifyEmail;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
@@ -15,6 +16,7 @@ use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 use Laravel\Fortify\Contracts\PasskeyUser;
+use Laravel\Fortify\Features;
 use Laravel\Fortify\PasskeyAuthenticatable;
 use Laravel\Fortify\TwoFactorAuthenticatable;
 
@@ -51,6 +53,31 @@ class User extends Authenticatable implements MustVerifyEmail, PasskeyUser
             'password' => 'hashed',
             'current_club_id' => 'integer',
         ];
+    }
+
+    /**
+     * With email verification switched off (Fortify email-verification feature), every user counts
+     * as verified, so the verified middleware, policies and invitation flow keep working.
+     */
+    public function hasVerifiedEmail(): bool
+    {
+        if (! Features::enabled(Features::emailVerification())) {
+            return true;
+        }
+
+        return ! is_null($this->email_verified_at);
+    }
+
+    /**
+     * No verification email when verification is switched off.
+     */
+    public function sendEmailVerificationNotification(): void
+    {
+        if (! Features::enabled(Features::emailVerification())) {
+            return;
+        }
+
+        $this->notify(new VerifyEmail);
     }
 
     /**

@@ -160,18 +160,26 @@ return [
     |
     */
 
-    'features' => [
+    // Email verification and passkeys are gated by PICKLEQ_EMAIL_VERIFICATION and
+    // PICKLEQ_PASSKEYS (default off). This feature list is the single source of truth: the
+    // app checks Features::enabled(...) everywhere else. env() is safe with config:cache
+    // since config files are evaluated only when the cache is built.
+    'features' => array_values(array_filter([
         Features::registration(),
         Features::resetPasswords(),
-        Features::emailVerification(),
+        filter_var(env('PICKLEQ_EMAIL_VERIFICATION', false), FILTER_VALIDATE_BOOL)
+            ? Features::emailVerification()
+            : null,
         Features::twoFactorAuthentication([
             'confirm' => true,
             'confirmPassword' => true,
             // 'window' => 0
         ]),
-        Features::passkeys([
-            'confirmPassword' => true,
-        ]),
-    ],
+        filter_var(env('PICKLEQ_PASSKEYS', false), FILTER_VALIDATE_BOOL)
+            ? Features::passkeys([
+                'confirmPassword' => true,
+            ])
+            : null,
+    ])),
 
 ];

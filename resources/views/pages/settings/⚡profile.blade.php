@@ -3,6 +3,7 @@
 use App\Concerns\ProfileValidationRules;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Flux\Flux;
+use Laravel\Fortify\Features;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Session;
 use Livewire\Attributes\Computed;
@@ -65,7 +66,9 @@ new #[Title('Profile settings')] class extends Component {
     #[Computed]
     public function hasUnverifiedEmail(): bool
     {
-        return Auth::user() instanceof MustVerifyEmail && ! Auth::user()->hasVerifiedEmail();
+        return Features::enabled(Features::emailVerification())
+            && Auth::user() instanceof MustVerifyEmail
+            && ! Auth::user()->hasVerifiedEmail();
     }
 
     #[Computed]
