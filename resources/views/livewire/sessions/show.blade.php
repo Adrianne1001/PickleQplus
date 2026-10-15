@@ -1,4 +1,4 @@
-<section class="w-full max-w-7xl space-y-6 lg:space-y-8" wire:poll.30s.visible="syncFromBroadcast">
+<section class="board-fs-wide w-full max-w-7xl space-y-6 lg:space-y-8" wire:poll.30s.visible="syncFromBroadcast" x-data="boardFullscreen()">
     @if ($club->is_guest)
         <x-guest.banner :club="$club" />
         <livewire:guest.organizer-link :club="$club" :key="'guest-organizer-'.$club->id" />
@@ -29,6 +29,7 @@
                     <flux:button icon="arrow-down-tray" class="min-h-11" :href="route('clubs.sessions.dupr', [$club, $session])" wire:navigate data-test="dupr-export-link">{{ __('DUPR export') }}</flux:button>
                 @endif
                 @unless ($session->isEnded())
+                    <flux:button icon="arrows-pointing-out" class="min-h-11" x-on:click="toggle()" x-show="! on" data-test="board-fullscreen-button">{{ __('Full screen') }}</flux:button>
                     <flux:button icon="pencil-square" class="min-h-11" :href="route('clubs.sessions.edit', [$club, $session])" wire:navigate data-test="edit-session-button">{{ __('Edit') }}</flux:button>
                 @endunless
                 @if ($session->isLive())
@@ -44,6 +45,18 @@
             </div>
         </x-slot:actions>
     </x-page-header>
+
+    <button
+        type="button"
+        x-cloak
+        x-show="on"
+        x-on:click="turnOff()"
+        class="fixed bottom-4 end-4 z-40 inline-flex min-h-11 items-center gap-2 rounded-xl bg-zinc-900 px-4 py-2 text-sm font-semibold text-white shadow-lg ring-1 ring-white/20 hover:bg-zinc-700 focus-visible:outline-2 focus-visible:outline-offset-2 dark:bg-white dark:text-zinc-900 dark:ring-black/10 dark:hover:bg-zinc-200"
+        data-test="board-fullscreen-exit"
+    >
+        <flux:icon.arrows-pointing-in class="size-5" />
+        {{ __('Exit full screen') }}
+    </button>
 
     @error('status')
         <flux:callout variant="danger" icon="exclamation-circle" data-test="session-error">

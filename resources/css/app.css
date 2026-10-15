@@ -165,3 +165,20 @@ summary:focus-visible {
         display: none;
     }
 }
+
+/* ------------------------------------------------------------------
+ * Board full screen (Phase 15): board-fullscreen.js puts `board-fullscreen` on <html>.
+ * Layout chrome carries `.board-chrome` (sidebar, mobile header, guest top bar, back link,
+ * page description) and is hidden; `.board-fs-wide` containers lose their max width.
+ * ------------------------------------------------------------------ */
+html.board-fullscreen .board-chrome {
+    display: none !important;
+}
+
+html.board-fullscreen .board-fs-wide {
+    max-width: none;
+}
+
+[x-cloak] {
+    display: none !important;
+}

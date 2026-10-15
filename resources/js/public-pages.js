@@ -1,3 +1,4 @@
+import { createWakeLock, fullscreenSupported, toggleFullscreen } from './fullscreen';
 import { decide, messageFor, stateFor } from './queue-alerts';
 
 const meKey = (publicId) => `pickleq.me.${publicId}`;
@@ -110,35 +111,21 @@ function checkinMe() {
 
 /** Alpine component for the TV: full screen button and best-effort wake lock. */
 function tvScreen() {
+    const wakeLock = createWakeLock();
+
     return {
-        supported: typeof document.documentElement.requestFullscreen === 'function',
-        wakeLock: null,
+        supported: fullscreenSupported(),
 
         init() {
-            this.requestWakeLock();
-            document.addEventListener('visibilitychange', () => {
-                if (document.visibilityState === 'visible') {
-                    this.requestWakeLock();
-                }
-            });
+            wakeLock.start();
+        },
+
+        destroy() {
+            wakeLock.stop();
         },
 
         toggleFullscreen() {
-            if (document.fullscreenElement) {
-                document.exitFullscreen();
-            } else {
-                document.documentElement.requestFullscreen();
-            }
-        },
-
-        async requestWakeLock() {
-            try {
-                if ('wakeLock' in navigator) {
-                    this.wakeLock = await navigator.wakeLock.request('screen');
-                }
-            } catch {
-                // Best effort only.
-            }
+            toggleFullscreen();
         },
     };
 }

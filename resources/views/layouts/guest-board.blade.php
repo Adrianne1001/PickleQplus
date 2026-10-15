@@ -15,7 +15,7 @@
     <body class="min-h-screen bg-zinc-50 text-zinc-900 antialiased dark:bg-zinc-950 dark:text-zinc-100">
         <a href="#main" class="sr-only z-50 rounded-lg bg-white px-4 py-2 font-semibold text-zinc-900 focus:not-sr-only focus:fixed focus:start-4 focus:top-4">{{ __('Skip to content') }}</a>
 
-        <header class="sticky top-0 z-30 border-b border-zinc-200 bg-white/90 backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/90" data-test="guest-topbar">
+        <header class="board-chrome sticky top-0 z-30 border-b border-zinc-200 bg-white/90 backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/90" data-test="guest-topbar">
             {{-- Phones: brand mark only, and the badge wraps onto its own row, so nothing overflows at 320 px. --}}
             <div class="mx-auto flex max-w-7xl flex-wrap items-center gap-x-2 gap-y-1.5 px-4 py-2.5 sm:flex-nowrap sm:gap-x-3 sm:px-6 lg:px-8">
                 <x-brand size="sm" :href="route('home')" class="max-sm:[&>span:last-child]:sr-only" />
@@ -44,7 +44,7 @@
             </div>
         </header>
 
-        <main id="main" class="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8 [&>section]:mx-auto">
+        <main id="main" class="board-fs-wide mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8 [&>section]:mx-auto">
             {{ $slot }}
         </main>
 

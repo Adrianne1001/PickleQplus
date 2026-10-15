@@ -10,3 +10,5 @@ import './guest-expiry';
 import './echo';
 
 import './public-pages';
+
+import './board-fullscreen';
