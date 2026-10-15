@@ -35,7 +35,10 @@ trait LoadsPublicSession
 
         $club = Club::query()->where('slug', $this->clubSlug)->firstOrFail();
 
-        return $this->resolvedSession = PlaySession::findByPublicIdOrFail($club, $this->publicId);
+        $session = PlaySession::findByPublicIdOrFail($club, $this->publicId);
+
+        // Already loaded here; the guest expiry hook reads it without another query.
+        return $this->resolvedSession = $session->setRelation('club', $club);
     }
 
     /** @return PublicSnapshot */

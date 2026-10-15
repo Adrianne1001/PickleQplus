@@ -1,9 +1,15 @@
 <section class="w-full max-w-7xl space-y-6 lg:space-y-8" wire:poll.30s.visible="syncFromBroadcast">
+    @if ($club->is_guest)
+        <x-guest.banner :club="$club" />
+        <livewire:guest.organizer-link :club="$club" :key="'guest-organizer-'.$club->id" />
+        <x-guest.expiry-watch :session="$session" :club="$club" />
+    @endif
+
     <x-page-header
         :eyebrow="$club->name"
         :title="$session->name"
         :description="$session->date->format('D, j M Y').' · '.trans_choice(':count court|:count courts', $session->courts).' · '.__('to :to, win by :by', ['to' => $session->scoring['to'], 'by' => $session->scoring['win_by']])"
-        :back="route('clubs.sessions.index', $club)"
+        :back="$club->is_guest ? null : route('clubs.sessions.index', $club)"
         :back-label="__('All sessions')"
     >
         <div class="mt-3"><x-session-status-badge :status="$session->status" /></div>
@@ -19,7 +25,7 @@
                 @unless ($session->isDraft())
                     <flux:button icon="chart-bar" class="min-h-11" :href="route('clubs.sessions.results', [$club, $session])" wire:navigate data-test="results-link">{{ __('Results') }}</flux:button>
                 @endunless
-                @if ($session->isEnded())
+                @if ($session->isEnded() && ! $club->is_guest)
                     <flux:button icon="arrow-down-tray" class="min-h-11" :href="route('clubs.sessions.dupr', [$club, $session])" wire:navigate data-test="dupr-export-link">{{ __('DUPR export') }}</flux:button>
                 @endif
                 @unless ($session->isEnded())
@@ -30,7 +36,7 @@
                         <flux:button variant="danger" icon="stop" class="min-h-11" data-test="end-session-button">{{ __('End session') }}</flux:button>
                     </flux:modal.trigger>
                 @endif
-                @if ($session->isDraft())
+                @if ($session->isDraft() && ! $club->is_guest)
                     <flux:modal.trigger name="delete-session">
                         <flux:button variant="danger" icon="trash" class="min-h-11" data-test="delete-session-button">{{ __('Delete') }}</flux:button>
                     </flux:modal.trigger>
@@ -88,6 +94,7 @@
         </div>
     </flux:modal>
 
+    @unless ($club->is_guest)
     <flux:modal name="delete-session" class="max-w-lg">
         <div class="space-y-6">
             <div>
@@ -102,4 +109,5 @@
             </div>
         </div>
     </flux:modal>
+    @endunless
 </section>

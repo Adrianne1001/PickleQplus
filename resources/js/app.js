@@ -4,6 +4,9 @@
  * allow your team to quickly build robust real-time web applications.
  */
 
+// Registered first, so the 404/410 hook still works if Echo fails to start.
+import './guest-expiry';
+
 import './echo';
 
 import './public-pages';

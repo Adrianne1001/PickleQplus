@@ -40,9 +40,8 @@ class CheckInQr extends Component
         $this->authorize('manage', $this->session);
 
         $user = auth()->user();
-        abort_unless($user instanceof User, 403);
 
-        $sessions->regenerateCheckinToken($this->session, $user);
+        $sessions->regenerateCheckinToken($this->session, $user instanceof User ? $user : null);
         $this->session->refresh();
 
         Flux::modals()->close();
@@ -54,9 +53,8 @@ class CheckInQr extends Component
         $this->authorize('manage', $this->session);
 
         $user = auth()->user();
-        abort_unless($user instanceof User, 403);
 
-        $sessions->resetTvLink($this->session, $user);
+        $sessions->resetTvLink($this->session, $user instanceof User ? $user : null);
         $this->session->refresh();
 
         Flux::toast(variant: 'success', text: __('New TV link created. Open it on the TV.'));

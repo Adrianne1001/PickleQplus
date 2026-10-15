@@ -138,6 +138,9 @@
                             @endauth
                         </div>
                         <p class="mt-4 text-sm text-zinc-600 dark:text-zinc-400">No per-court fees. Players never need an account.</p>
+                        @guest
+                            <x-guest.start-form class="mt-8 max-w-xl" />
+                        @endguest
                     </div>
 
                     {{-- Court board mock (illustration only) --}}

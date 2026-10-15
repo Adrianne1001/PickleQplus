@@ -57,7 +57,7 @@ If you have no `mysql` CLI (common on Windows), create the database from your GU
 composer dev
 ```
 
-This runs the web server (http://localhost:8000), Vite, the Reverb WebSocket server (port 8080) and the queue worker together. Press Ctrl+C to stop them all.
+This runs the web server (http://localhost:8000), Vite, the Reverb WebSocket server (port 8080), the queue worker and the scheduler (`schedule:work`) together. Press Ctrl+C to stop them all. (`composer dev` runs `php artisan dev`; the scheduler process is registered in `bootstrap/app.php`.)
 
 To run the pieces separately (one terminal each):
 
@@ -66,9 +66,10 @@ php artisan serve
 npm run dev
 php artisan reverb:start
 php artisan queue:work
+php artisan schedule:work
 ```
 
-Live features (TV and phone views) need Reverb and the queue worker running. Emails are written to `storage/logs/laravel.log` (`MAIL_MAILER=log`).
+Live features (TV and phone views) need Reverb and the queue worker running. Guest sessions are purged only while the scheduler runs (`schedule:work`, which `composer dev` includes). Emails are written to `storage/logs/laravel.log` (`MAIL_MAILER=log`).
 
 ### Tests and code quality
 
@@ -101,3 +102,16 @@ $env:DB_CONNECTION='mysql'; $env:DB_DATABASE='pickleq_test'; $env:DB_USERNAME='r
 Tests need the Vite manifest for views that render assets, so run `npm run build` once before the first `composer test` on a fresh clone.
 
 CI (`.github/workflows/ci.yml`) runs `composer lint` and `composer test` on pushes to `main`, on every pull request, and on manual dispatch (`workflow_dispatch`).
+
+## Production notes (Phase 6)
+
+Full server setup lands in Phase 6. Requirements already known:
+
+- **Scheduler cron (required, P6.3).** Add this crontab entry for the app user. Without it, scheduled work does not run, including the guest-session purge (`pickleq:purge-guest-clubs`), so expired guest data would never be deleted:
+
+  ```cron
+  * * * * * cd /path/to/pickleq && php artisan schedule:run >> /dev/null 2>&1
+  ```
+
+- **Queue worker and Reverb** run under Supervisor.
+- **Secure cookies.** Serve over HTTPS and set `SESSION_SECURE_COOKIE=true` in the production `.env`. This also covers the guest-session cookie. Leave it unset locally (plain HTTP dev).

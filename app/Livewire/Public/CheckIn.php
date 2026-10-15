@@ -169,7 +169,7 @@ class CheckIn extends Component
             'session' => $session,
             'selected' => $selected,
             'levels' => self::LEVELS,
-            'queueUrl' => $session === null ? null : url('/c/'.($session->club()->value('slug')).'/s/'.$session->public_id),
+            'queueUrl' => $session === null ? null : url('/c/'.($session->club ?? abort(404))->slug.'/s/'.$session->public_id),
         ]);
     }
 

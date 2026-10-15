@@ -82,7 +82,10 @@ class Show extends Component
 
     public function render(): View
     {
-        return view('livewire.sessions.show');
+        $view = view('livewire.sessions.show');
+
+        // A guest (no account) gets the plain layout: the app sidebar assumes a signed-in user.
+        return $this->club->is_guest ? $view->layout('layouts::guest-board', ['title' => __('Session'), 'club' => $this->club]) : $view;
     }
 
     private function afterChange(string $message): void

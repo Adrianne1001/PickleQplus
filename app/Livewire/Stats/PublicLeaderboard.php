@@ -28,6 +28,9 @@ class PublicLeaderboard extends Component
 
     public function mount(Club $club): void
     {
+        // A guest club has no public club pages (Phase 14).
+        abort_if($club->is_guest, 404);
+
         $this->clubSlug = $club->slug;
     }
 

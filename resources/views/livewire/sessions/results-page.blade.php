@@ -1,11 +1,16 @@
 <section class="w-full max-w-5xl space-y-4 lg:space-y-6">
+    @if ($club->is_guest)
+        <x-guest.banner :club="$club" />
+        <x-guest.expiry-watch :session="$session" :club="$club" />
+    @endif
+
     <a href="{{ route('clubs.sessions.show', [$club, $session]) }}" wire:navigate class="inline-flex min-h-10 items-center gap-1 text-sm font-medium text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white">
         <flux:icon.chevron-left class="size-4" />
         {{ __('Back to session') }}
     </a>
 
     <x-results.body :results="$results" :standings="$standings" staff :live="! $session->isEnded()">
-        @if ($previous || $next)
+        @if (($previous || $next) && ! $club->is_guest)
             <x-slot:neighbours>
                 <x-results.neighbours :previous="$previous" :next="$next" :all-url="route('clubs.sessions.index', $club)" :all-label="__('All sessions')" />
             </x-slot:neighbours>

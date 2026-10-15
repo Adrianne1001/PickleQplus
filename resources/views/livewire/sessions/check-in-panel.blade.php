@@ -47,7 +47,7 @@
                 :term="trim($search)"
                 :show="$quickAdd['show']"
                 :deactivated="$quickAdd['deactivated']"
-                :roster="route('clubs.players.index', $session->club)"
+                :roster="$session->club->is_guest ? null : route('clubs.players.index', $session->club)"
                 action="saveQuick"
             />
         </div>

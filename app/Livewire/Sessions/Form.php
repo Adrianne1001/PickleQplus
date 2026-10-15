@@ -385,9 +385,11 @@ class Form extends Component
     {
         $ended = $this->session?->isEnded() ?? false;
 
-        return view('livewire.sessions.form', [
+        $view = view('livewire.sessions.form', [
             'modes' => RotationMode::selectable(),
             'quickAdd' => $ended ? ['show' => false, 'deactivated' => null] : $this->quickAddState(),
         ]);
+
+        return $this->club->is_guest ? $view->layout('layouts::guest-board', ['title' => __('Session'), 'club' => $this->club]) : $view;
     }
 }

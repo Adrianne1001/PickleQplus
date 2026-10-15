@@ -2,6 +2,8 @@
 
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DuprExportDownloadController;
+use App\Http\Controllers\GuestClaimController;
+use App\Http\Controllers\GuestSessionController;
 use App\Http\Controllers\InvitationAcceptController;
 use App\Http\Controllers\PodiumImageController;
 use App\Http\Controllers\PublicClubRedirectController;
@@ -57,10 +59,6 @@ Route::middleware(['auth', 'verified'])->group(function () {
             // Sessions ("create" is declared before {session}).
             Route::livewire('sessions', SessionsIndex::class)->name('clubs.sessions.index');
             Route::livewire('sessions/create', SessionForm::class)->name('clubs.sessions.create');
-            Route::livewire('sessions/{session}', SessionShow::class)->name('clubs.sessions.show');
-            Route::livewire('sessions/{session}/edit', SessionForm::class)->name('clubs.sessions.edit');
-
-            Route::livewire('sessions/{session}/results', SessionResultsPage::class)->name('clubs.sessions.results');
             Route::livewire('sessions/{session}/dupr', DuprExportPage::class)->name('clubs.sessions.dupr');
 
             // DUPR export history re-download (P4.5). The export is resolved through the session.
@@ -69,6 +67,34 @@ Route::middleware(['auth', 'verified'])->group(function () {
                 ->name('clubs.sessions.dupr.download');
         });
 });
+
+/*
+| Board, edit and results pages (P14.2). `club.access` runs the old chain for a normal club
+| (login, verified, member) and checks the organizer cookie for a guest club. Declared after
+| the member group so `sessions/create` is matched first.
+*/
+Route::prefix('clubs/{club:slug}')
+    ->middleware('club.access')
+    ->scopeBindings()
+    ->group(function () {
+        Route::livewire('sessions/{session}', SessionShow::class)->name('clubs.sessions.show');
+        Route::livewire('sessions/{session}/edit', SessionForm::class)->name('clubs.sessions.edit');
+        Route::livewire('sessions/{session}/results', SessionResultsPage::class)->name('clubs.sessions.results');
+    });
+
+// --- Phase 14 guest sessions (no account) ---
+Route::post('guest/start', [GuestSessionController::class, 'start'])->name('guest.start');
+Route::get('guest/claim/{club:slug}', [GuestClaimController::class, 'show'])
+    ->middleware('throttle:guest-link')
+    ->name('guest.claim');
+Route::post('guest/claim/{club:slug}', [GuestClaimController::class, 'store'])
+    ->middleware(['auth', 'verified', 'throttle:guest-link'])
+    ->name('guest.claim.store');
+Route::get('guest/expired', [GuestSessionController::class, 'expired'])->name('guest.expired');
+Route::get('guest/{token}', [GuestSessionController::class, 'enter'])
+    ->where('token', '[A-Za-z0-9]{40}')
+    ->middleware('throttle:guest-link')
+    ->name('guest.enter');
 
 // --- Phase 3 public pages (no auth; read-only except self check-in) ---
 Route::livewire('c/{club:slug}/s/{publicId}', PublicQueue::class)

@@ -12,12 +12,16 @@ use App\Models\SessionPlayer;
 use App\Models\User;
 use App\Notifications\ClubInvitationNotification;
 use App\Services\CheckInService;
+use App\Services\GuestClubService;
 use App\Services\InvitationService;
 use App\Services\RosterImport\RosterImportPreview;
 use App\Services\RosterImport\RosterImportRow;
 use App\Services\RosterImportService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Str;
+use Livewire\Livewire;
+use Livewire\Mechanisms\PersistentMiddleware\PersistentMiddleware;
 use Tests\TestCase;
 
 /*
@@ -168,4 +172,47 @@ function teamGenders(GameMatch $match): array
 function genderedPlayerOf(GameMatch $match, string $gender): Player
 {
     return Player::findOrFail($match->matchPlayers()->whereHas('player', fn ($q) => $q->where('gender', $gender))->first()->player_id);
+}
+
+/**
+ * A guest club with one session. Returns the club, the session and the plain organizer token.
+ * Use `$this->withCookie(guestCookie($club), $token)` to act as its organizer.
+ *
+ * @param  array<string, mixed>  $sessionAttrs
+ * @return array{0: Club, 1: PlaySession, 2: string}
+ */
+function guestBoard(array $sessionAttrs = [], ?DateTimeInterface $expires = null): array
+{
+    $token = Str::random(40);
+    $club = Club::factory()->guest($token, $expires)->create();
+    $session = PlaySession::factory()->for($club)->create($sessionAttrs);
+
+    return [$club, $session, $token];
+}
+
+function guestCookie(Club $club): string
+{
+    return GuestClubService::cookieName($club);
+}
+
+function guestSnapshot(string $html): string
+{
+    preg_match('/wire:snapshot="([^"]*)"/', $html, $m);
+
+    return html_entity_decode($m[1] ?? '', ENT_QUOTES);
+}
+
+function guestAction(mixed $test, string $snapshot, string $method): mixed
+{
+    // Livewire memoizes applied persistent middleware per route; clear it so each call really runs it.
+    $memo = new ReflectionProperty(PersistentMiddleware::class, 'middlewareAppliedFor');
+    $memo->setValue(app(PersistentMiddleware::class), []);
+
+    return $test->withCredentials()->postJson(Livewire::getUpdateUri(), [
+        'components' => [[
+            'snapshot' => $snapshot,
+            'updates' => [],
+            'calls' => [['path' => '', 'method' => $method, 'params' => []]],
+        ]],
+    ], ['X-Livewire' => '1']);
 }

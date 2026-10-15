@@ -61,6 +61,7 @@ class Tv extends Component
         $open = ! $session->isEnded() && $token !== null;
 
         return view('livewire.public.tv', [
+            'session' => $session,
             'data' => $data,
             // The SVG only depends on the token, so don't rebuild it on every refresh.
             'svg' => $open ? Cache::remember('qr:tv:'.hash('sha256', (string) $qr->url($session)), 3600, fn (): ?string => $qr->svg($session, 480)) : null,
@@ -73,7 +74,7 @@ class Tv extends Component
     {
         if ($this->resolved === null) {
             $club = Club::query()->where('slug', $this->clubSlug)->firstOrFail();
-            $this->resolved = PlaySession::findByTvIdOrFail($club, $this->tvId);
+            $this->resolved = PlaySession::findByTvIdOrFail($club, $this->tvId)->setRelation('club', $club);
         }
 
         return $this->resolved;

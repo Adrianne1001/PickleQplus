@@ -13,7 +13,6 @@ use App\Models\User;
 use App\Rules\ClubSlug;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
@@ -76,6 +75,29 @@ class ClubService
     }
 
     /**
+     * Refuse when the user already owns the maximum number of clubs. Call it with the user row
+     * locked, so concurrent creates and claims cannot exceed the cap. Shared by create() and
+     * GuestClubService::claim().
+     *
+     * @param  string  $errorKey  The validation error key to report under.
+     *
+     * @throws ValidationException
+     */
+    public function assertCanOwnAnotherClub(User $user, string $errorKey = 'name'): void
+    {
+        $owned = ClubMembership::query()
+            ->where('user_id', $user->id)
+            ->where('role', ClubRole::Owner->value)
+            ->count();
+
+        if ($owned >= (int) config('pickleq.max_owned_clubs')) {
+            throw ValidationException::withMessages([
+                $errorKey => 'You already own the maximum of '.config('pickleq.max_owned_clubs').' clubs, so you cannot create another one.',
+            ]);
+        }
+    }
+
+    /**
      * @param  array{name: string, dupr_club_id?: string|null, default_courts?: int|null}  $data
      */
     private function createOnce(User $creator, array $data): Club
@@ -84,16 +106,7 @@ class ClubService
             // Lock the user row so concurrent creates cannot exceed the cap.
             User::query()->whereKey($creator->id)->lockForUpdate()->first();
 
-            $owned = ClubMembership::query()
-                ->where('user_id', $creator->id)
-                ->where('role', ClubRole::Owner->value)
-                ->count();
-
-            if ($owned >= (int) config('pickleq.max_owned_clubs')) {
-                throw ValidationException::withMessages([
-                    'name' => 'You already own the maximum of '.config('pickleq.max_owned_clubs').' clubs, so you cannot create another one.',
-                ]);
-            }
+            $this->assertCanOwnAnotherClub($creator);
 
             $club = Club::create([
                 'name' => $data['name'],
@@ -119,6 +132,10 @@ class ClubService
     {
         /** @var array{name?: string, slug?: string, dupr_club_id?: string|null, default_courts?: int} $data */
         $data = self::normalize($data);
+
+        if (isset($data['slug']) && $data['slug'] !== $club->slug && ClubSlug::usesGuestPrefix($data['slug'])) {
+            throw ValidationException::withMessages(['slug' => 'That slug is reserved.']);
+        }
 
         try {
             $club->fill($data)->save();
@@ -186,13 +203,17 @@ class ClubService
 
     public function delete(Club $club): void
     {
-        DB::transaction(function () use ($club): void {
+        $cleanup = app(ClubCleanup::class);
+        $sessionIds = [];
+
+        DB::transaction(function () use ($club, $cleanup, &$sessionIds): void {
+            $sessionIds = $cleanup->sessionIds($club);
             $club->delete();
             User::flushRoleCache();
         });
 
-        // Exports cascade in the DB; remove their files once the delete has committed.
-        Storage::disk('local')->deleteDirectory('dupr-exports/'.$club->id);
+        // Rows cascade in the DB; remove files (podium images, DUPR exports) and caches once the delete has committed.
+        $cleanup->afterDelete($club->id, $sessionIds);
     }
 
     /**
@@ -316,6 +337,8 @@ class ClubService
     {
         $base = Str::slug($name);
         $base = $base === '' ? 'club' : $base;
+        // `guest-` slugs are reserved for guest clubs, so a name like "Guest Night" becomes club-guest-night.
+        $base = ClubSlug::usesGuestPrefix($base) ? 'club-'.$base : $base;
         $ignoreId = $ignore?->id;
 
         $slug = $this->slugCandidate($base, 1);

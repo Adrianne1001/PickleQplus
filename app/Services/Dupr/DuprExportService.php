@@ -35,6 +35,11 @@ class DuprExportService
             return DB::transaction(function () use ($session, $user, &$written): DuprExport {
                 $this->lockSession($session);
 
+                // A guest club has no DUPR export (Phase 14).
+                if ($session->club()->value('is_guest')) {
+                    throw ValidationException::withMessages(['session' => 'DUPR export is not available for guest sessions. Sign up to keep your session and export it.']);
+                }
+
                 if (! $session->isEnded()) {
                     throw ValidationException::withMessages(['session' => 'End the session before exporting to DUPR.']);
                 }

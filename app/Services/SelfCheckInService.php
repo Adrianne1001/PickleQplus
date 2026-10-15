@@ -127,6 +127,7 @@ class SelfCheckInService
         $this->throttle("selfcheckin:submit:{$ip}:{$session->id}", self::SUBMITS_PER_MINUTE, 60, 'Too many attempts. Please wait a minute and try again.');
 
         $gender = $this->parseGender($gender);
+        $this->guardGuestActive($session);
 
         return DB::transaction(function () use ($session, $token, $playerPublicId, $gender): array {
             $this->lockSession($session);
@@ -165,7 +166,7 @@ class SelfCheckInService
                 $player->forceFill(['gender' => $gender])->save();
             }
 
-            $this->checkIns->checkIn($session, $player);
+            $this->checkIns->checkIn($session, $player, checkExpiry: false);
 
             // checkIn() returns early for a player already in, so refill and notify once here.
             if ($genderSet && $result === 'already_checked_in') {
@@ -213,9 +214,17 @@ class SelfCheckInService
         try {
             $result = DB::transaction(function () use ($session, $token, $data, $gender, $onRoster): array {
                 // Same lock order as PlaySessionService::start(): club, session, then players.
-                Club::query()->whereKey($session->club_id)->lockForUpdate()->firstOrFail();
+                $club = Club::query()->whereKey($session->club_id)->lockForUpdate()->firstOrFail();
+                $this->guardClubNotExpired($club);
                 $this->lockSession($session);
                 $this->assertUsable($session, $token);
+
+                if ($club->is_guest) {
+                    $max = (int) config('pickleq.guest.max_roster');
+                    if (Player::query()->where('club_id', $club->id)->count() >= $max) {
+                        throw ValidationException::withMessages(['register' => 'This guest session is full. Ask the organizer to add you.']);
+                    }
+                }
 
                 // A brand-new player cannot be in another live session, so the race that
                 // CheckInService guards against does not apply. The club lock serialises
@@ -249,7 +258,7 @@ class SelfCheckInService
                     'self_registered_session_id' => $session->id,
                 ])->save();
 
-                $this->checkIns->checkIn($session, $player);
+                $this->checkIns->checkIn($session, $player, checkExpiry: false);
 
                 return ['result' => 'registered', 'player_id' => (string) $player->public_id, 'public_name' => $player->name];
             });

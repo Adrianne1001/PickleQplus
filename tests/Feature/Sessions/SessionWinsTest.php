@@ -44,8 +44,12 @@ function winsSetup(): array
 {
     $club = Club::factory()->withOwner(User::factory()->create())->create();
     $session = PlaySession::factory()->for($club)->live()->create();
-    $hero = Player::factory()->for($club)->manual(3)->create();
-    $others = Player::factory()->for($club)->manual(3)->count(3)->create()->all();
+    // Fixed names: random Faker names (O'Keefe, Wonderland) break raw-HTML assertions now and then.
+    $hero = Player::factory()->for($club)->manual(3)->create(['name' => 'Hero Hawk']);
+    $others = [];
+    foreach (['Otto Oak', 'Pia Pine', 'Quin Quill'] as $name) {
+        $others[] = Player::factory()->for($club)->manual(3)->create(['name' => $name]);
+    }
     foreach ([$hero, ...$others] as $p) {
         SessionPlayer::factory()->create(['play_session_id' => $session->id, 'player_id' => $p->id, 'status' => SessionPlayerStatus::Waiting]);
     }
@@ -153,11 +157,14 @@ it('renders a side-by-side match board without wins badges on the public queue',
         ->toContain('data-test="team-a"')
         ->toContain('data-test="team-b"')
         ->toContain('data-test="match-vs"')
-        ->toContain($hero->name)
-        ->toContain('data-test="court-open"')
-        ->not->toContain('2W');
-    // Wins appear only in the Players section, never on the match board.
-    expect(substr($html, 0, strpos($html, 'data-test="queue-players"')))->not->toContain('player-wins');
+        ->toContain(e($hero->name))
+        ->toContain('data-test="court-open"');
+    // Wins appear only in the Players section, never on the match board. Scope the checks to the
+    // board part of the page: the rest holds random ids that could contain any short token.
+    $board = substr($html, 0, strpos($html, 'data-test="queue-players"'));
+    expect($board)->not->toContain('player-wins')
+        ->not->toContain('2W')
+        ->not->toMatch('/\b\d+ wins?\b/');
     expect(substr_count($html, 'data-test="queue-court"'))->toBeGreaterThan(1);
 });
 

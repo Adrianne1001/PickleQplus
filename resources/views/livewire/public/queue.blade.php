@@ -43,11 +43,17 @@
     @endpush
 
     <main class="mx-auto flex min-h-screen w-full max-w-3xl flex-col gap-5 px-4 pb-24 pt-5" data-test="queue-page">
-        <x-public.club-header :club-name="$club->name" :slug="$club->slug" active="sessions" />
+        <x-guest.expiry-watch :session="$session" public />
+        {{-- A guest club has no public club pages: no tabs, no other sessions. --}}
+        @unless ($club->is_guest)
+            <x-public.club-header :club-name="$club->name" :slug="$club->slug" active="sessions" />
+        @endunless
         <p class="sr-only">{{ __('Session ended. Thanks for playing!') }}</p>
 
         <x-results.body :results="$results" :standings="$results['standings']">
-            @if ($previous || $next)
+            @if ($club->is_guest)
+                {{-- no neighbours --}}
+            @elseif ($previous || $next)
                 <x-slot:neighbours>
                     <x-results.neighbours :previous="$previous" :next="$next" :all-url="route('public.sessions', $club->slug)" :all-label="__('All sessions')" />
                 </x-slot:neighbours>
@@ -69,6 +75,7 @@
     @if ($data['status'] !== 'ended') wire:poll.30s.visible @endif
     data-test="queue-page"
 >
+    <x-guest.expiry-watch :session="$session" public />
     <header class="space-y-2" x-data="{ shareOpen: false, copied: false, canShare: typeof navigator.share === 'function' }">
         <div class="flex items-center justify-between gap-3">
             <x-brand size="sm" />

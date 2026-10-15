@@ -69,7 +69,8 @@ test('the winner marker appears once, on the winning team', function () {
 
     $html = Livewire::actingAs($user)->test(Results::class, ['session' => $session])->html();
     expect(substr_count($html, 'data-test="result-winner"'))->toBe(1)
-        ->and(strpos($html, 'Won'))->toBeGreaterThan(strpos($html, 'Cy &amp; Di'));
+        // Anchor on the badge element, not the bare word "Won", which can also sit inside random text.
+        ->and(strpos($html, 'data-test="result-winner"'))->toBeGreaterThan(strpos($html, 'Cy &amp; Di'));
 });
 
 test('ties and missing scores show no winner', function () {

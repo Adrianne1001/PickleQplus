@@ -41,7 +41,7 @@ class SessionFormService
 
         return DB::transaction(function () use ($club, $session, $data, $ids, $newPlayers): PlaySession {
             // Lock order club -> session -> players, as PlaySessionService::start().
-            Club::query()->whereKey($club->id)->lockForUpdate()->firstOrFail();
+            $this->guardClubNotExpired(Club::query()->whereKey($club->id)->lockForUpdate()->firstOrFail());
 
             if ($session !== null) {
                 if ($session->club_id !== $club->id) {
@@ -62,7 +62,7 @@ class SessionFormService
 
             foreach ($picks as $player) {
                 try {
-                    $this->checkIns->checkIn($session, $player);
+                    $this->checkIns->checkIn($session, $player, checkExpiry: false);
                 } catch (ValidationException $e) {
                     $first = collect($e->errors())->flatten()->first();
                     throw ValidationException::withMessages(['players' => "{$player->name}: {$first}"]);
@@ -72,7 +72,7 @@ class SessionFormService
             foreach ($newPlayers as $i => $row) {
                 $player = $this->checkIns->createQuickPlayer($club, $row, "new_players.{$i}.");
                 try {
-                    $this->checkIns->checkIn($session, $player);
+                    $this->checkIns->checkIn($session, $player, checkExpiry: false);
                 } catch (ValidationException $e) {
                     $first = collect($e->errors())->flatten()->first();
                     throw ValidationException::withMessages(['players' => "{$player->name}: {$first}"]);

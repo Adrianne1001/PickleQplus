@@ -59,6 +59,8 @@ class CheckInService
      */
     public function addNewPlayer(PlaySession $session, array $data): SessionPlayer
     {
+        $this->guardGuestActive($session);
+
         return DB::transaction(function () use ($session, $data): SessionPlayer {
             // Lock order club -> session, as PlaySessionService::start().
             $club = Club::query()->whereKey($session->club_id)->lockForUpdate()->firstOrFail();
@@ -67,7 +69,7 @@ class CheckInService
 
             $player = $this->createQuickPlayer($club, $data);
 
-            return $this->checkIn($session, $player);
+            return $this->checkIn($session, $player, checkExpiry: false);
         });
     }
 
@@ -119,10 +121,17 @@ class CheckInService
      * session and not `left` is left untouched; a `left` player is re-checked
      * in; a player on `break` returns from break.
      *
+     * @param  bool  $checkExpiry  False for callers that already checked it (a plain read here, inside
+     *                             their transaction, would break the race-safety rule below).
+     *
      * @throws ValidationException
      */
-    public function checkIn(PlaySession $session, Player $player): SessionPlayer
+    public function checkIn(PlaySession $session, Player $player, bool $checkExpiry = true): SessionPlayer
     {
+        if ($checkExpiry) {
+            $this->guardGuestActive($session);
+        }
+
         return DB::transaction(function () use ($session, $player): SessionPlayer {
             $this->lockSession($session);
             $this->guardOpen($session);
@@ -153,6 +162,10 @@ class CheckInService
             // Keep any non-locking read out of this method above this line.
             if ($session->isLive()) {
                 $this->guardOtherLiveSession($session, $player);
+            }
+
+            if ($entry === null || $entry->status === SessionPlayerStatus::Left) {
+                $this->guardGuestCapacity($session);
             }
 
             if ($entry === null) {
@@ -254,9 +267,10 @@ class CheckInService
      *
      * @throws ValidationException
      */
-    public function removeCheckIn(PlaySession $session, Player $player, User $actor): void
+    public function removeCheckIn(PlaySession $session, Player $player, ?User $actor): void
     {
         Gate::forUser($actor)->authorize('manage', $session);
+        $this->guardGuestActive($session);
 
         DB::transaction(function () use ($session, $player): void {
             $this->lockSession($session);
@@ -300,6 +314,8 @@ class CheckInService
      */
     public function checkOut(PlaySession $session, Player $player): SessionPlayer
     {
+        $this->guardGuestActive($session);
+
         return $this->leaveQueue($session, $player, SessionPlayerStatus::Left);
     }
 
@@ -310,6 +326,8 @@ class CheckInService
      */
     public function goOnBreak(PlaySession $session, Player $player): SessionPlayer
     {
+        $this->guardGuestActive($session);
+
         return $this->leaveQueue($session, $player, SessionPlayerStatus::Break);
     }
 
@@ -321,6 +339,8 @@ class CheckInService
      */
     public function returnFromBreak(PlaySession $session, Player $player): SessionPlayer
     {
+        $this->guardGuestActive($session);
+
         return DB::transaction(function () use ($session, $player): SessionPlayer {
             $this->lockSession($session);
             $this->guardOpen($session);
@@ -462,6 +482,30 @@ class CheckInService
     /**
      * @throws ValidationException
      */
+    /**
+     * A guest club allows a limited number of checked-in players (not `left`) per session. Called
+     * inside the session lock when an entry is new or returns from `left`, so it is race-safe.
+     *
+     * @throws ValidationException
+     */
+    private function guardGuestCapacity(PlaySession $session): void
+    {
+        $isGuest = (bool) Club::query()->whereKey($session->club_id)->value('is_guest');
+        if (! $isGuest) {
+            return;
+        }
+
+        $max = (int) config('pickleq.guest.max_checked_in');
+        $checkedIn = SessionPlayer::query()
+            ->where('play_session_id', $session->id)
+            ->where('status', '!=', SessionPlayerStatus::Left->value)
+            ->count();
+
+        if ($checkedIn >= $max) {
+            throw ValidationException::withMessages(['player' => "A guest session can have at most {$max} players checked in. Sign up for more."]);
+        }
+    }
+
     private function guardOpen(PlaySession $session): void
     {
         if ($session->status === SessionStatus::Ended) {

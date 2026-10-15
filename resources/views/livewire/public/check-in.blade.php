@@ -12,6 +12,7 @@
     x-on:me-selected.window="remember($event.detail.publicId, $event.detail.playerId)"
     data-test="checkin-page"
 >
+    <x-guest.expiry-watch :session="$session" public />
     @if ($session === null)
         <div class="flex flex-1 flex-col items-center justify-center text-center" data-test="checkin-closed">
             <x-empty-state icon="lock-closed" :title="__('Check-in is closed')" :description="__('This check-in link is no longer active. Please ask the organizer for the current QR code.')" class="w-full" />

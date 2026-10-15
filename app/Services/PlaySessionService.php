@@ -71,13 +71,21 @@ class PlaySessionService
             'auto_fill' => false,
             'scoring' => self::DEFAULT_SCORING,
             'rotation_mode' => RotationMode::Balanced->value,
-        ], null);
+        ], null, $club);
 
         $session = new PlaySession($values);
         $session->status = SessionStatus::Draft;
         $session->club()->associate($club);
 
-        return DB::transaction(function () use ($session): PlaySession {
+        return DB::transaction(function () use ($session, $club): PlaySession {
+            // A guest club may hold one session. The club row lock makes the count race-safe.
+            $locked = Club::query()->whereKey($club->id)->lockForUpdate()->firstOrFail();
+            $this->guardClubNotExpired($locked);
+            if ($locked->is_guest
+                && PlaySession::query()->where('club_id', $locked->id)->count() >= (int) config('pickleq.guest.max_sessions')) {
+                throw ValidationException::withMessages(['session' => 'A guest session can only have one session. Sign up to create more.']);
+            }
+
             $session->save();
             PlaySessionChanged::dispatch($session->id);
 
@@ -98,6 +106,8 @@ class PlaySessionService
      */
     public function update(PlaySession $session, array $data): PlaySession
     {
+        $this->guardGuestActive($session);
+
         return DB::transaction(function () use ($session, $data): PlaySession {
             $this->lockSession($session);
             $this->guardNotEnded($session);
@@ -108,7 +118,7 @@ class PlaySessionService
                 $merged['scoring'] = array_replace($session->scoring, $data['scoring']);
             }
 
-            $values = $this->validated($merged, $session);
+            $values = $this->validated($merged, $session, $session->club);
 
             if ($values['courts'] < $session->courts) {
                 $blocked = $session->matches()
@@ -189,6 +199,7 @@ class PlaySessionService
     {
         return DB::transaction(function () use ($session): PlaySession {
             $club = Club::query()->whereKey($session->club_id)->lockForUpdate()->firstOrFail();
+            $this->guardClubNotExpired($club);
             $this->lockSession($session);
 
             // Lock this session's checked-in players in one statement BEFORE any plain read.
@@ -254,6 +265,8 @@ class PlaySessionService
      */
     public function end(PlaySession $session): PlaySession
     {
+        $this->guardGuestActive($session);
+
         return DB::transaction(function () use ($session): PlaySession {
             $this->lockSession($session);
 
@@ -284,9 +297,10 @@ class PlaySessionService
      *
      * @throws ValidationException
      */
-    public function regenerateCheckinToken(PlaySession $session, User $actor): PlaySession
+    public function regenerateCheckinToken(PlaySession $session, ?User $actor): PlaySession
     {
         Gate::forUser($actor)->authorize('manage', $session);
+        $this->guardGuestActive($session);
 
         return DB::transaction(function () use ($session): PlaySession {
             $this->lockSession($session);
@@ -304,9 +318,10 @@ class PlaySessionService
      * Replace the secret TV link id; the old TV URL stops working at once.
      * Staff only; allowed in any status.
      */
-    public function resetTvLink(PlaySession $session, User $actor): void
+    public function resetTvLink(PlaySession $session, ?User $actor): void
     {
         Gate::forUser($actor)->authorize('manage', $session);
+        $this->guardGuestActive($session);
 
         DB::transaction(function () use ($session): void {
             $this->lockSession($session);
@@ -390,14 +405,16 @@ class PlaySessionService
      *
      * @throws ValidationException
      */
-    private function validated(array $data, ?PlaySession $existing): array
+    private function validated(array $data, ?PlaySession $existing, ?Club $club = null): array
     {
+        $maxCourts = $club?->is_guest ? min(self::COURTS_MAX, (int) config('pickleq.guest.max_courts')) : self::COURTS_MAX;
+
         $data['date'] = $data['date'] instanceof \DateTimeInterface ? $data['date']->format('Y-m-d') : $data['date'];
 
         $validated = Validator::make($data, [
             'name' => ['required', 'string', 'max:120'],
             'date' => ['required', 'date_format:Y-m-d'],
-            'courts' => ['required', 'integer', 'between:'.self::COURTS_MIN.','.self::COURTS_MAX],
+            'courts' => ['required', 'integer', 'between:'.self::COURTS_MIN.','.$maxCourts],
             'up_next_count' => ['required', 'integer', 'between:1,3'],
             'auto_fill' => ['required', 'boolean'],
             'scoring' => ['required', 'array'],
@@ -410,7 +427,7 @@ class PlaySessionService
             'mode_settings' => ['sometimes', 'nullable', 'array'],
             'mode_settings.winners_stay_max_wins' => ['sometimes', 'nullable', 'integer', 'between:'.self::WINNERS_STAY_MIN.','.self::WINNERS_STAY_MAX],
             'mode_settings.skill_groups' => ['sometimes', 'nullable', 'array'],
-        ])->validate();
+        ], $maxCourts < self::COURTS_MAX ? ['courts.between' => "A guest session can have at most {$maxCourts} courts. Sign up for more."] : [])->validate();
 
         /** @var array<string, mixed> $scoring */
         $scoring = $validated['scoring'];

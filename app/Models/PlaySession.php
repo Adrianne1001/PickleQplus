@@ -6,6 +6,7 @@ use App\Enums\RotationMode;
 use App\Enums\SessionStatus;
 use Database\Factories\PlaySessionFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -86,7 +87,7 @@ class PlaySession extends Model
      */
     public static function findByPublicId(Club $club, string $publicId): ?self
     {
-        return self::query()->where('club_id', $club->id)->where('public_id', $publicId)->first();
+        return self::publiclyVisible()->where('club_id', $club->id)->where('public_id', $publicId)->first();
     }
 
     /**
@@ -99,7 +100,7 @@ class PlaySession extends Model
 
     public static function findByTvId(Club $club, string $tvId): ?self
     {
-        return self::query()->where('club_id', $club->id)->where('tv_id', $tvId)->first();
+        return self::publiclyVisible()->where('club_id', $club->id)->where('tv_id', $tvId)->first();
     }
 
     /**
@@ -110,6 +111,16 @@ class PlaySession extends Model
         return self::findByTvId($club, $tvId) ?? throw (new ModelNotFoundException)->setModel(self::class);
     }
 
+    /**
+     * Sessions the public pages may show: not those of an expired guest club (not purged yet).
+     *
+     * @return Builder<self>
+     */
+    public static function publiclyVisible(): Builder
+    {
+        return self::query()->whereHas('club', fn (Builder $q) => $q->notExpiredGuest());
+    }
+
     /** Session for a check-in token, only while it is draft or live. */
     public static function findByCheckinToken(string $token): ?self
     {
@@ -117,7 +128,7 @@ class PlaySession extends Model
             return null;
         }
 
-        return self::query()
+        return self::publiclyVisible()
             ->where('checkin_token', $token)
             ->whereIn('status', [SessionStatus::Draft->value, SessionStatus::Live->value])
             ->first();

@@ -88,9 +88,8 @@ class CheckInPanel extends Component
         $this->authorize('manage', $this->session);
 
         $user = auth()->user();
-        abort_unless($user instanceof User, 403);
 
-        $checkIns->removeCheckIn($this->session, $this->player($playerId), $user);
+        $checkIns->removeCheckIn($this->session, $this->player($playerId), $user instanceof User ? $user : null);
     }
 
     public function goOnBreak(CheckInService $checkIns, int $playerId): void

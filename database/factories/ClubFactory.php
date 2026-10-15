@@ -34,6 +34,21 @@ class ClubFactory extends Factory
     }
 
     /**
+     * A guest club (Phase 14): hidden, no members, expiring. The plain token is `$token`;
+     * only its hash is stored. Pass `expires` to set the expiry.
+     */
+    public function guest(?string $token = null, ?\DateTimeInterface $expires = null): static
+    {
+        return $this->state(fn (): array => [
+            'name' => 'Guest session',
+            'slug' => 'guest-'.Str::lower(Str::random(12)),
+            'is_guest' => true,
+            'guest_token_hash' => hash('sha256', $token ?? Str::random(40)),
+            'guest_expires_at' => $expires ?? now()->addHours((int) config('pickleq.guest.idle_hours')),
+        ]);
+    }
+
+    /**
      * Attach an owner (a new verified user unless one is given).
      */
     public function withOwner(?User $owner = null): static

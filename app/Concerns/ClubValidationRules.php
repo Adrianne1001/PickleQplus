@@ -34,7 +34,7 @@ trait ClubValidationRules
     {
         return [
             'name' => ['required', 'string', 'max:120'],
-            'slug' => ['required', 'string', 'max:50', new ClubSlug, Rule::unique('clubs', 'slug')->ignore($club->id)],
+            'slug' => ['required', 'string', 'max:50', new ClubSlug($club->slug), Rule::unique('clubs', 'slug')->ignore($club->id)],
             'dupr_club_id' => $this->duprClubIdRules(),
             'default_courts' => ['required', 'integer', 'between:1,30'],
         ];

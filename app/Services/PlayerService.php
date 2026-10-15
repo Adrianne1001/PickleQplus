@@ -107,6 +107,14 @@ class PlayerService
     {
         $exists = $player->exists;
 
+        // A guest club's roster is capped. The caller holds the club row lock, so the count is race-safe.
+        if (! $exists && $club->is_guest) {
+            $max = (int) config('pickleq.guest.max_roster');
+            if (Player::query()->where('club_id', $club->id)->count() >= $max) {
+                throw ValidationException::withMessages(['name' => "A guest session can have at most {$max} players. Sign up for more."]);
+            }
+        }
+
         $name = array_key_exists('name', $data) ? trim((string) $data['name']) : $player->name;
         $duprId = array_key_exists('dupr_id', $data) ? DuprPlayerId::normalize($data['dupr_id']) : $player->dupr_id;
 

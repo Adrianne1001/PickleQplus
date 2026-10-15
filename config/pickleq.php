@@ -84,4 +84,23 @@ return [
     */
     'rotation_modes_enabled' => ['balanced', 'mixed', 'skill_courts', 'social'],
 
+    /*
+    | Guest sessions (Phase 14): a hidden, temporary club for someone with no account.
+    | Caps are enforced in services. A guest club is deleted `idle_hours` after its last
+    | activity, and never lives longer than `max_hours` after creation. `starts_per_hour`
+    | is the per-IP start limit, `max_active` the circuit breaker on unexpired guest clubs.
+    */
+    'guest' => [
+        'max_courts' => (int) env('PICKLEQ_GUEST_MAX_COURTS', 6),
+        'max_checked_in' => (int) env('PICKLEQ_GUEST_MAX_CHECKED_IN', 40),
+        'max_roster' => (int) env('PICKLEQ_GUEST_MAX_ROSTER', 60),
+        'max_sessions' => 1,
+        'idle_hours' => (int) env('PICKLEQ_GUEST_IDLE_HOURS', 24),
+        'max_hours' => (int) env('PICKLEQ_GUEST_MAX_HOURS', 72),
+        'starts_per_hour' => (int) env('PICKLEQ_GUEST_STARTS_PER_HOUR', 5),
+        'max_active' => (int) env('PICKLEQ_GUEST_MAX_ACTIVE', 500),
+        // Seconds a start waits for the start lock (it serialises the max_active count and the insert).
+        'start_lock_wait' => 5,
+    ],
+
 ];

@@ -6,6 +6,8 @@ use App\Enums\ClubRole;
 use App\Enums\LateArrivalPolicy;
 use Database\Factories\ClubFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Attributes\Scope;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
@@ -22,6 +24,10 @@ use Illuminate\Support\Carbon;
  * @property LateArrivalPolicy $late_arrival_policy
  * @property bool $allow_concurrent_sessions
  * @property int $leaderboard_min_games
+ * @property bool $is_guest
+ * @property string|null $guest_token_hash
+ * @property Carbon|null $guest_expires_at
+ * @property Carbon|null $guest_claimed_at
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  */
@@ -38,6 +44,7 @@ class Club extends Model
         'late_arrival_policy' => 'minimum',
         'allow_concurrent_sessions' => false,
         'leaderboard_min_games' => 10,
+        'is_guest' => false,
     ];
 
     /** Container key under which EnsureClubMember binds the current club. */
@@ -69,7 +76,55 @@ class Club extends Model
             'late_arrival_policy' => LateArrivalPolicy::class,
             'allow_concurrent_sessions' => 'boolean',
             'leaderboard_min_games' => 'integer',
+            'is_guest' => 'boolean',
+            'guest_expires_at' => 'datetime',
+            'guest_claimed_at' => 'datetime',
         ];
+    }
+
+    /** A hidden, temporary club started without an account (Phase 14). */
+    public function isGuest(): bool
+    {
+        return $this->is_guest;
+    }
+
+    /** A guest club whose expiry has passed (it may not be purged yet). A non-guest club never expires. */
+    public function isGuestExpired(): bool
+    {
+        return $this->is_guest && ($this->guest_expires_at === null || $this->guest_expires_at->lte(now()));
+    }
+
+    /**
+     * Guest clubs that have not expired.
+     *
+     * @param  Builder<Club>  $query
+     */
+    #[Scope]
+    protected function activeGuests(Builder $query): void
+    {
+        $query->where('is_guest', true)->where('guest_expires_at', '>', now());
+    }
+
+    /**
+     * Clubs that are not an expired guest club: every normal club and each unexpired guest club.
+     *
+     * @param  Builder<Club>  $query
+     */
+    #[Scope]
+    protected function notExpiredGuest(Builder $query): void
+    {
+        $query->where(fn (Builder $q) => $q->where('is_guest', false)->orWhere('guest_expires_at', '>', now()));
+    }
+
+    /**
+     * Guest clubs whose expiry has passed.
+     *
+     * @param  Builder<Club>  $query
+     */
+    #[Scope]
+    protected function expiredGuests(Builder $query): void
+    {
+        $query->where('is_guest', true)->where('guest_expires_at', '<=', now());
     }
 
     /**

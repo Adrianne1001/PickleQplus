@@ -245,6 +245,42 @@ Phase 7 additions (P7.4, see `docs/design/p7.4-rotation-modes.md`): `players.gen
   - **On the session form:** the new player joins the "To check in" list with a "new" marker, and is created on Save. Two pending new players with the same name (case-insensitive) are rejected.
 - **Who:** owners and staff (the session `manage` policy and the player `create` policy). The club always comes from the route, never from the request.
 
+**Phase 14 rules: guest sessions (decided 2026-10-14/15, user request; change here first if needed). Full design: `docs/design/p14-guest-sessions.md`.**
+- **Goal (user request):** anyone can start an open-play session **without an account**. It's limited, and its data is temporary.
+- **Model:** "Start as guest" creates a hidden **guest club**: `clubs.is_guest`, `guest_token_hash`, `guest_expires_at` and `guest_claimed_at`. It has a random slug and no `club_user` rows. The board, rotation engine, public queue, TV and QR self check-in are reused unchanged.
+- **Guest identity:**
+  - A random 40-character token. Only its SHA-256 hash is stored, compared with `hash_equals`.
+  - The token lives in an encrypted HttpOnly cookie `pickleq_guest_{club id}` (SameSite Lax).
+  - A private **organizer link** `/guest/{token}` (throttled) sets the cookie on another device and redirects, so the token leaves the address bar.
+  - Whoever holds the organizer link controls the guest session and can claim it.
+- **Expiry (user decision):** all guest data is deleted **24 h after the last activity**, with a **hard cap of 72 h after creation**. Activity means any session state change, i.e. any `PlaySessionChanged` event: check-in, staging, match start or finish, score, settings, QR regenerate, TV reset, or ending the session. Page views and polling never count. An expired club never comes back. The guest sees a countdown banner.
+- **Limits (user decision, "standard guest"; config `pickleq.guest`):**
+  - **Counts:** 1 session, at most **6 courts**, at most **40 checked-in** players (entries that aren't `left`), and at most **60 players** created per guest club. Every cap is enforced in services under the existing locks, not only in the UI.
+  - **Allowed:** board, all rotation modes, public queue, TV display and QR self check-in. The ended results page and podium images work until deletion.
+  - **Disabled (404 or hidden):** DUPR export (the service also refuses), staff stats and leaderboard, player list and profiles, roster import, members and invites, club settings, sessions list and create, session delete, the public leaderboard, the public sessions list and the `/c/{club}` redirect.
+- **Access:**
+  - `clubs.sessions.show`, `.edit` and `.results` move under a `club.access` middleware. For a guest club it needs a valid, unexpired cookie, and binds a `GuestOwnerContext`. For a normal club it behaves exactly as today (login → verified → member). It's also registered as Livewire persistent middleware.
+  - One `Gate::before` grants **only** PlaySession `view`/`update`/`manage` and Player `create`, and only for that same club. It never denies.
+  - Guest pages use a guest layout, because the app sidebar assumes a user.
+- **Start:**
+  - `POST /guest/start` from the landing page: guests (not logged in) only, 5 per hour per IP, plus the registration honeypot.
+  - A circuit breaker allows at most `pickleq.guest.max_active` (500) unexpired guest clubs.
+  - The guest optionally names the session. The hidden club is named "Guest session".
+  - A logged-in user is sent to create a club instead.
+- **Purge:**
+  - `pickleq:purge-guest-clubs` runs every 5 minutes (`withoutOverlapping`), in chunks.
+  - Per club, in one transaction: lock the club, re-check it's still a guest and expired, then `$club->delete()` and let the foreign keys cascade.
+  - After commit: delete the podium image files, forget the public caches, keep a 7-day `guest-gone:{slug}` tombstone (so the page says "expired" rather than a bare 404), and broadcast `session.expired`.
+  - It shares a file-cleanup helper with `ClubService::delete`.
+  - Nothing is purged unless the scheduler runs (`schedule:work` locally, cron in P6.3).
+  - *(Settled at the P14 reviews.)* Board, edit and results Livewire calls on an expired, missing or tombstoned guest club get **410**, and only a 410 redirects a board page to "expired" (a benign 404 doesn't). Public queue and TV use the tombstone too, so they show "expired" rather than a bare 404. Normal clubs can't use slugs starting with `guest-`. Expired guest clubs refuse every service write. The 6th guest start in an hour shows a friendly message on the landing page rather than a bare 429.
+  - *(Settled at P14.7.)* Once a guest club **expires**, its public queue, TV, check-in, results and podium pages are 404 straight away (a `publiclyVisible()` scope), even before the purge runs. A second claim over HTTP gets 404, because the cookie no longer matches.
+- **Claim (user decision):**
+  - "Sign up to keep this session" goes to `/guest/claim/{club}` (needs the cookie). A logged-out visitor registers or logs in and returns there via `intended`.
+  - `POST` locks the user, then the club, and re-checks guest, not expired and the token. Then `ClubPolicy::create` (verified, which follows the P13 flag) and the `max_owned_clubs` cap.
+  - It attaches the user as owner, clears the guest columns, sets `guest_claimed_at`, and allows a rename. The slug is kept, so live links keep working.
+  - The first claim wins. Claim vs purge is safe because both lock the club row.
+
 ---
 
 ## 3. Balanced rotation engine
@@ -497,6 +533,20 @@ Rules: "wins" means this session's wins only, counted as in the Phase 5 rules (`
 - [ ] **P13.2** Re-enable email verification once a real mail provider is configured (needs P6). Set `PICKLEQ_EMAIL_VERIFICATION=true`, then run `php artisan optimize`.
 - [ ] **P13.3** Re-enable passkeys once the app is served over HTTPS on a stable host matching `APP_URL` (needs P6.2). Set `PICKLEQ_PASSKEYS=true`, then run `php artisan optimize`.
 
+### Phase 14 — Guest sessions *(branch `feature/p14-guest-sessions`; added 2026-10-14, user request; see Phase 14 rules)*
+- [x] **P14.1** Data: migration (`is_guest`, `guest_token_hash` unique, `guest_expires_at` indexed, `guest_claimed_at`), Club casts and helpers, factory `guest()` state, `pickleq.guest` config. Done when migrate, rollback and migrate pass.
+- [x] **P14.2** Access: `EnsureClubAccess` + route regroup + Livewire persistent middleware, `GuestOwnerContext`, the `Gate::before` whitelist, `?User` actors (QR regenerate, TV reset, remove check-in). Done when the existing suite passes unchanged and a guest of club A gets 404 on club B, and a visitor with only a guest cookie gets the usual login redirect on every member-only route (they're behind `auth`, so nothing is revealed; a signed-in non-member still gets 404). *(Settled at P14.2.)*
+- [x] **P14.3** Start: `GuestClubService::start`, `/guest/start`, the organizer link and the expired page routes, limiter, honeypot, circuit breaker, cookie. Done when one start creates exactly one club, one draft session and a token hash, the 6th start in an hour is 429, and a filled honeypot is rejected.
+- [x] **P14.4** Limits in services: 1 session, 6 courts (create, update, skill-group resize), 40 checked in, 60 roster. Done when each is rejected on every write path (form, board, quick-add, self check-in, self-register) and normal clubs are unaffected.
+- [x] **P14.5** Activity: `TouchGuestActivity` listener and the expiry check. Done when state changes extend expiry up to the 72 h cap, polling and page views don't, and an expired club stays expired.
+- [x] **P14.6** Guest 404s: public leaderboard, public sessions list, `/c/{club}` redirect, and the DUPR export refusal. Done when each is 404 or refused for a guest club, while the ended results page and podium images work.
+- [x] **P14.7** Purge: command, schedule, file, cache and tombstone cleanup, `session.expired` broadcast, cleanup shared with club delete. Done when no rows or podium files remain for a purged club and a claimed or unexpired club is never purged.
+- [x] **P14.8** Claim: service and routes. Done when claiming works through register and login (verification flag on and off), and the owned-club cap, expired, wrong-token and double-claim cases are rejected.
+- [x] **P14.9** UI: landing page "Start as guest", guest layout, countdown banner, organizer-link panel, "Sign up to keep this session", forbidden links hidden, expired and claim pages, the `session.expired` listener and 404 redirect on poll. Livewire tests, light and dark.
+- [x] **P14.10** Tests: authorization matrix (guest vs member vs stranger on every club route), MySQL lock tests (limit races, claim vs purge), purge file checks.
+- [x] **P14.11** Dev and ops: `schedule:work` in the dev script and README, scheduler cron noted for P6.3, secure cookie settings for production.
+- [ ] **P14.12** Manual check: start as guest, open the organizer link on a second device, run a session, wait for or force expiry, see the purge and the expired page, and claim via sign-up.
+
 ---
 
 ## 6. Risks and open items
@@ -515,8 +565,12 @@ Rules: "wins" means this session's wins only, counted as in the Phase 5 rules (`
 - **Nicknames in the DUPR CSV (P9, low):** the CSV's player name columns carry `name` as entered, which may now be a nickname like "Ace". DUPR identifies players by the DUPR ID column. P4.7 (the real upload) should include a player with a nickname-style name, to confirm DUPR accepts it.
 - **Test memory (from P7.4g, 2026-10-09):** the full suite outgrew PHP's default 128M CLI limit (growth, not a leak; checked on the podium renderer). `phpunit.xml` sets `memory_limit` 512M, and `php artisan test` honours it.
 - **Stale compiled views (found at P12, 2026-10-09):** `SocialUiTest` failed on `main` because a stale compiled Blade view in `storage/framework/views` (Flux/Blaze) lacked the form's `social` help arm. `php artisan view:clear` fixed it with no code change. `composer test` clears only the config cache. If a view assertion fails while the Blade source looks right, run `view:clear` first.
-- **Flaky test on apostrophe names (seen at P12, low):** `tests/Feature/Sessions/SessionWinsTest.php` (~line 156) asserts `toContain($hero->name)` on raw HTML. A random Faker name like "O'Keefe" is escaped to `O&#039;Keefe`, so the test fails now and then. Fix when convenient: give the player a fixed name, or compare against `e($hero->name)`.
+- ~~**Flaky test on apostrophe names (seen at P12, low):**~~ *Fixed in P14.10 (fixed names, assertions scoped to `data-test` regions; the `2W` and `Won` flakes in `SessionWinsTest` / `MatchHistoryTest` too).* `tests/Feature/Sessions/SessionWinsTest.php` (~line 156) asserts `toContain($hero->name)` on raw HTML. A random Faker name like "O'Keefe" is escaped to `O&#039;Keefe`, so the test fails now and then. Fix when convenient: give the player a fixed name, or compare against `e($hero->name)`.
 - **Parallel test runs collide:** two `composer test` runs at the same time (e.g. two subagents) share the `livewire-tmp` upload folder, and the roster-import tests fail intermittently. Run the full suite from one place at a time. A failure seen only under parallel runs isn't a real regression.
 - **Stats period filter and indexes (from the P5 review, low):** the period filter uses `whereDate()` on `play_sessions.date`, so MySQL can't use an index on that column. Queries are already limited by `club_id`, so this is fine at club scale. If the leaderboard gets slow, switch to `whereBetween` on normalised bounds and add a `(club_id, date)` index.
 - **Missing wait estimates in mixed mode (from the P7.4b review, low):** in mixed mode, the TV and public queue show "–" for any waiting player who can't get an estimate: players with no gender, and players whose gender doesn't have enough partners from the other gender waiting. Someone watching could guess that a "–" player might have no gender on record. We accept this, because the gender value itself is never shown publicly.
+- **Guest purge depends on the scheduler (P14, P6.3):** nothing deletes guest data unless `schedule:run` runs every minute (cron in production, `schedule:work` locally, which `composer dev` now starts). Without it, expired guest clubs stay in the database and the 24 h / 72 h promise is broken. Guest pages still refuse expired clubs, because the expiry check is separate from the purge. P6.3 must install the cron. Consider a health check on the last purge run.
+- **Guest organizer link is a bearer credential (P14, P6.2):** whoever has `/guest/{token}` controls the guest session and can claim it. In production, set `SESSION_SECURE_COOKIE=true` and serve over HTTPS, so the guest cookie (built with `cookie()`, which inherits `session.secure`) never travels over plain HTTP. The UI warns guests not to post the link publicly. The per-IP guest start limit needs TrustProxies, like the signup throttle.
+- **Orphan podium file after a guest purge (P14 review, low, accepted):** a podium render already in flight can write `podium/{session id}` just after the purge deleted that folder. The file is unreachable (its session is gone) and harmless. Clean it up if it ever matters.
+- **Never run artisan with `--env=testing` (P14, 2026-10-15):** there's no `.env.testing`, so the command runs against the local MySQL dev database. A `migrate:fresh --env=testing` during P14 wiped the dev data. Tests run only via `composer test` / `composer test:mysql`.
 - **Formula injection in the DUPR CSV (from the P4 design, low):** player names are exported as entered, because DUPR needs the exact names. A self-registered name that starts with `=`, `+`, `-` or `@` could run as a formula if staff open the file in Excel. We accept this risk: the file is meant to be uploaded to DUPR rather than opened, and staff can see self-registered players on the board ("new" badge).

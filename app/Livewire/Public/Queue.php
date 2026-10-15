@@ -39,7 +39,7 @@ class Queue extends Component
 
     public function mount(Club $club, string $publicId): void
     {
-        $session = PlaySession::findByPublicIdOrFail($club, $publicId);
+        $session = PlaySession::findByPublicIdOrFail($club, $publicId)->setRelation('club', $club);
 
         $this->clubSlug = $club->slug;
         $this->publicId = $publicId;
@@ -70,6 +70,7 @@ class Queue extends Component
         $shareUrl = route('public.queue', [$this->clubSlug, $session->public_id]);
 
         $data = [
+            'session' => $session,
             'shareUrl' => $shareUrl,
             'shareSvg' => $qr->svgForUrl($shareUrl, 320),
             'data' => $snapshot,

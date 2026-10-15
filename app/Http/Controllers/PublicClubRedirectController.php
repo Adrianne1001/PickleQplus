@@ -12,6 +12,9 @@ class PublicClubRedirectController extends Controller
 {
     public function __invoke(Club $club): RedirectResponse
     {
+        // A guest club has no public club pages (Phase 14).
+        abort_if($club->is_guest, 404);
+
         return redirect()->route('public.sessions', $club);
     }
 }

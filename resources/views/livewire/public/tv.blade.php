@@ -39,6 +39,7 @@
     x-data="tvScreen()"
     data-test="tv"
 >
+    <x-guest.expiry-watch :session="$session" public />
     <header class="mb-4 flex items-center justify-between gap-6">
         <div class="flex min-w-0 items-center gap-5">
             <x-brand size="lg" :wordmark="false" tabindex="-1" />

@@ -3,11 +3,16 @@
 @endphp
 
 <section class="w-full max-w-3xl space-y-6">
+    @if ($club->is_guest)
+        <x-guest.banner :club="$club" />
+        <x-guest.expiry-watch :session="$session" :club="$club" />
+    @endif
+
     <x-page-header
         :eyebrow="$club->name"
         :title="$session ? __('Edit session') : __('New session')"
         :description="$session ? __('Change the name, courts or rotation before the session ends.') : __('Set up an open play night. You can start it when players arrive.')"
-        :back="$session ? route('clubs.sessions.show', [$club, $session]) : route('clubs.sessions.index', $club)"
+        :back="$session ? route('clubs.sessions.show', [$club, $session]) : ($club->is_guest ? null : route('clubs.sessions.index', $club))"
         :back-label="$session ? __('Back to session') : __('All sessions')"
     />
 
@@ -27,7 +32,7 @@
                 <flux:input wire:model="date" type="date" :label="__('Date')" required :disabled="$ended" />
 
                 <div class="grid gap-4 sm:grid-cols-2">
-                    <flux:input wire:model="courts" type="number" min="1" max="50" inputmode="numeric" :label="__('Courts')" required :disabled="$ended" />
+                    <flux:input wire:model="courts" type="number" min="1" :max="$club->is_guest ? config('pickleq.guest.max_courts') : 50" inputmode="numeric" :label="__('Courts')" required :disabled="$ended" />
                     <flux:input wire:model="up_next_count" type="number" min="1" max="3" inputmode="numeric" :label="__('Up Next slots')" required :disabled="$ended" />
                 </div>
             </div>
@@ -157,7 +162,7 @@
                         :term="trim($search)"
                         :show="$quickAdd['show']"
                         :deactivated="$quickAdd['deactivated']"
-                        :roster="route('clubs.players.index', $club)"
+                        :roster="$club->is_guest ? null : route('clubs.players.index', $club)"
                         action="addQuick"
                         :submit-label="__('Add to list')"
                     />
@@ -225,7 +230,7 @@
             <flux:button
                 variant="ghost"
                 class="min-h-11"
-                :href="$session ? route('clubs.sessions.show', [$club, $session]) : route('clubs.sessions.index', $club)"
+                :href="$session ? route('clubs.sessions.show', [$club, $session]) : ($club->is_guest ? route('home') : route('clubs.sessions.index', $club))"
                 wire:navigate
             >{{ __('Cancel') }}</flux:button>
         </div>

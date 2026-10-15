@@ -37,9 +37,10 @@ class ResultsPage extends Component
     {
         $results = $service->staffResults($this->session);
 
-        $standings = array_map(fn (array $r): array => $r + ['url' => route('clubs.players.show', [$this->club, $r['id'] ?? 0])], $results['standings']);
+        // A guest has no player pages, so standings carry no link there.
+        $standings = array_map(fn (array $r): array => $r + ['url' => $this->club->is_guest ? null : route('clubs.players.show', [$this->club, $r['id'] ?? 0])], $results['standings']);
 
-        $neighbour = fn (?array $n): ?array => $n === null ? null : [
+        $neighbour = fn (?array $n): ?array => $n === null || $this->club->is_guest ? null : [
             'url' => route('clubs.sessions.results', [$this->club, $n['id']]),
             'name' => $n['name'],
             'date' => $n['date'],
@@ -62,12 +63,14 @@ class ResultsPage extends Component
             ];
         }
 
-        return view('livewire.sessions.results-page', [
+        $view = view('livewire.sessions.results-page', [
             'results' => $results,
             'standings' => $standings,
             'previous' => $neighbour($results['previous']),
             'next' => $neighbour($results['next']),
             'share' => $share,
         ]);
+
+        return $this->club->is_guest ? $view->layout('layouts::guest-board', ['title' => __('Session results'), 'club' => $this->club]) : $view;
     }
 }
