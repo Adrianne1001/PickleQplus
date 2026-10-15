@@ -77,15 +77,15 @@
             </div>
         </x-card>
 
-        <x-card :title="__('Not Yet Here (:count)', ['count' => $this->notYetHere->count()])" :description="__('On the list, not checked in yet.')" data-test="not-yet-here">
+        <x-card :title="__('Not Yet Here (:count)', ['count' => $this->notYetHere->count()])" :description="__('On the list, not checked in yet.')" :padding="false" data-test="not-yet-here">
             <x-slot:actions>
                 @if ($this->notYetHere->isNotEmpty())
                     <flux:button variant="primary" icon="check-circle" class="min-h-11" wire:click="checkInAll" wire:loading.attr="disabled" wire:target="checkInAll" data-test="check-in-all-button">{{ __('Check in all') }}</flux:button>
                 @endif
             </x-slot:actions>
 
-            <div class="space-y-4">
-                @if ($checkInAllResult)
+            @if ($checkInAllResult)
+                <div class="p-5">
                     <flux:callout :variant="$checkInAllResult['skipped'] === [] ? 'success' : 'warning'" :icon="$checkInAllResult['skipped'] === [] ? 'check-circle' : 'exclamation-triangle'" data-test="check-in-all-result">
                         <flux:callout.heading>{{ trans_choice(':count player checked in.|:count players checked in.', $checkInAllResult['checked_in']) }}</flux:callout.heading>
                         @if ($checkInAllResult['skipped'] !== [])
@@ -102,43 +102,45 @@
                             <flux:button type="button" icon="x-mark" size="sm" variant="ghost" class="min-h-11 min-w-11" wire:click="dismissResults" aria-label="{{ __('Dismiss') }}" data-test="dismiss-check-in-all-result" />
                         </x-slot>
                     </flux:callout>
-                @endif
+                </div>
+            @endif
 
-                @if ($this->notYetHere->isEmpty())
-                    <x-empty-state icon="user-plus" :title="__('Nobody is waiting.')" :description="__('Search above or import a list to add players. Players you add show up here until you check them in.')" data-test="not-yet-here-empty" />
-                @else
-                    <ul class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" data-test="not-yet-here-list">
-                        @foreach ($this->notYetHere as $entry)
-                            @php($player = $entry->player)
-                            <li class="flex flex-col gap-3 rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-900" wire:key="nyh-{{ $entry->id }}" data-test="not-yet-here-card">
-                                <div class="min-w-0 space-y-1">
-                                    <p class="break-words text-base font-semibold text-zinc-900 dark:text-white" data-test="not-yet-here-name">{{ $player->name }}</p>
+            @if ($this->notYetHere->isEmpty())
+                <x-empty-state class="m-5" icon="user-plus" :title="__('Nobody is waiting.')" :description="__('Search above or import a list to add players. Players you add show up here until you check them in.')" data-test="not-yet-here-empty" />
+            @else
+                <ul class="divide-y divide-zinc-200 dark:divide-zinc-700" data-test="not-yet-here-list">
+                    @foreach ($this->notYetHere as $entry)
+                        @php($player = $entry->player)
+                        <li class="space-y-3 px-5 py-3" wire:key="nyh-{{ $entry->id }}" data-test="not-yet-here-card">
+                            <div class="flex flex-wrap items-center justify-between gap-3">
+                                <div class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+                                    <span class="break-words font-semibold text-zinc-900 dark:text-white" data-test="not-yet-here-name">{{ $player->name }}</span>
                                     @if ($player->stars_pending)
-                                        <p class="flex flex-wrap items-center gap-x-2 text-sm" data-test="skill-pending">
+                                        <span class="flex flex-wrap items-center gap-x-2 text-sm" data-test="skill-pending">
                                             <span class="text-zinc-400 dark:text-zinc-500" aria-hidden="true">★★★</span>
                                             <button type="button" wire:click="openSkill({{ $player->id }})" class="min-h-8 font-semibold text-brand-700 underline underline-offset-2 hover:text-brand-800 focus-visible:outline-2 focus-visible:outline-brand-600 dark:text-brand-400" data-test="set-skill-link">{{ __('Set skill') }}</button>
-                                        </p>
+                                        </span>
                                     @else
                                         <x-star-rating :stars="$player->stars" />
                                     @endif
                                 </div>
 
-                                @if ($skillFor === $player->id)
-                                    @include('livewire.sessions.partials.skill-picker', ['name' => $player->name])
-                                @endif
-
-                                <div class="mt-auto space-y-1">
-                                    <button type="button" wire:click="checkIn({{ $player->id }})" wire:loading.attr="disabled" wire:target="checkIn({{ $player->id }})" class="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-green-700 px-4 text-base font-semibold text-white shadow-xs hover:bg-green-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-green-700 disabled:opacity-60 dark:bg-green-600 dark:hover:bg-green-500 dark:focus-visible:outline-green-400" data-test="check-in-button">
+                                <div class="flex flex-wrap items-center gap-2">
+                                    <button type="button" wire:click="checkIn({{ $player->id }})" wire:loading.attr="disabled" wire:target="checkIn({{ $player->id }})" class="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-green-700 px-5 text-base font-semibold text-white shadow-xs hover:bg-green-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-green-700 disabled:opacity-60 dark:bg-green-600 dark:hover:bg-green-500 dark:focus-visible:outline-green-400" data-test="check-in-button">
                                         <flux:icon.check class="size-5" />
                                         {{ __('Check In') }}
                                     </button>
-                                    <button type="button" wire:click="removeFromList({{ $player->id }})" class="min-h-11 w-full rounded-lg px-3 text-sm font-semibold text-red-700 hover:bg-red-50 focus-visible:outline-2 focus-visible:outline-red-700 dark:text-red-400 dark:hover:bg-red-950/40" data-test="remove-from-list-button" aria-label="{{ __('Remove :name from the list', ['name' => $player->name]) }}">{{ __('Remove') }}</button>
+                                    <button type="button" wire:click="removeFromList({{ $player->id }})" class="min-h-11 rounded-lg px-3 text-sm font-semibold text-red-700 hover:bg-red-50 focus-visible:outline-2 focus-visible:outline-red-700 dark:text-red-400 dark:hover:bg-red-950/40" data-test="remove-from-list-button" aria-label="{{ __('Remove :name from the list', ['name' => $player->name]) }}">{{ __('Remove') }}</button>
                                 </div>
-                            </li>
-                        @endforeach
-                    </ul>
-                @endif
-            </div>
+                            </div>
+
+                            @if ($skillFor === $player->id)
+                                @include('livewire.sessions.partials.skill-picker', ['name' => $player->name])
+                            @endif
+                        </li>
+                    @endforeach
+                </ul>
+            @endif
         </x-card>
     @endunless
 
