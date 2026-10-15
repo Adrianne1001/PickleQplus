@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\Gender;
 use App\Enums\ListSource;
 use App\Enums\RatingSource;
 use App\Enums\SessionPlayerStatus;
@@ -380,10 +381,10 @@ test('selection splits rows into picks and new players in the shapes the form sa
 
     $selection = imp()->selection($club, null, $rows);
 
-    expect($selection['player_ids'])->toBe([['id' => $ana->id, 'source' => 'paste']])
+    expect($selection['player_ids'])->toBe([['id' => $ana->id, 'source' => 'paste', 'gender' => '']])
         ->and($selection['new_players'])->toBe([
-            ['name' => 'Cara Lim', 'stars' => null, 'dupr_id' => 'CC33DD', 'dupr_rating' => '4.200', 'source' => 'paste'],
-            ['name' => 'Dan', 'stars' => null, 'dupr_id' => null, 'dupr_rating' => null, 'source' => 'paste'],
+            ['name' => 'Cara Lim', 'stars' => null, 'dupr_id' => 'CC33DD', 'dupr_rating' => '4.200', 'gender' => '', 'source' => 'paste'],
+            ['name' => 'Dan', 'stars' => null, 'dupr_id' => null, 'dupr_rating' => null, 'gender' => '', 'source' => 'paste'],
         ])
         ->and($selection['errors'])->toBe(1);
 
@@ -468,4 +469,205 @@ test('imported players are not checked in, even for a live session, until staff 
 
     expect(SessionPlayer::query()->where('status', SessionPlayerStatus::Waiting->value)->count())->toBe(0)
         ->and(SessionListPlayer::query()->count())->toBe(2);
+});
+
+// --- gender (P16.8) ---
+
+test('a new player is created with the gender from the paste', function () {
+    $session = PlaySession::factory()->create();
+
+    $rows = impRows($session->club, $session, "Ana | gender=F\nBen | sex=male\nCara");
+
+    expect(array_column($rows, 'gender'))->toBe(['woman', 'man', ''])
+        ->and(impStatuses($rows))->toBe(['new', 'new', 'new']);
+
+    imp()->confirm($session, $rows);
+
+    $genders = Player::query()->where('club_id', $session->club_id)->pluck('gender', 'name')->map(fn ($g) => $g?->value)->all();
+    expect($genders)->toBe(['Ana' => 'woman', 'Ben' => 'man', 'Cara' => null]);
+});
+
+test('staff can set the gender of a row in the review and it is re-validated', function () {
+    $session = PlaySession::factory()->create();
+    $rows = impRows($session->club, $session, "Ana\nBen");
+    $rows[0]['gender'] = 'Woman';
+    $rows[1]['gender'] = 'M';
+
+    $reviewed = imp()->review($session->club, $session, $rows);
+
+    expect(array_column($reviewed, 'gender'))->toBe(['woman', 'man']);
+
+    imp()->confirm($session, $rows);
+
+    expect(Player::query()->where('name', 'Ana')->value('gender'))->toBe(Gender::Woman)
+        ->and(Player::query()->where('name', 'Ben')->value('gender'))->toBe(Gender::Man);
+});
+
+test('Reclub rows have no gender until staff set one', function () {
+    Http::preventStrayRequests();
+    Http::fake(['reclub.co/*' => Http::response((string) file_get_contents(__DIR__.'/../../Fixtures/reclub-event.html'))]);
+    $session = PlaySession::factory()->create();
+    RateLimiter::clear('reclub:fetch:club:'.$session->club_id);
+
+    $rows = imp()->reviewReclub($session->club, $session, 'https://reclub.co/m/synth1');
+
+    expect(array_unique(array_column($rows, 'gender')))->toBe(['']);
+});
+
+test('an unrecognised gender makes the row an error and nothing is created', function () {
+    $session = PlaySession::factory()->create();
+
+    $rows = impRows($session->club, $session, "Ana | gender=robot\nBen | gender=m");
+
+    expect(impStatuses($rows))->toBe(['error', 'new'])
+        ->and($rows[0]['message'])->toBe('Gender must be man or woman.')
+        ->and($rows[0]['gender'])->toBe('robot');
+
+    $result = imp()->confirm($session, $rows);
+
+    expect($result['created'])->toBe(1)->and($result['errors'])->toBe(1)
+        ->and(Player::query()->where('name', 'Ana')->exists())->toBeFalse();
+});
+
+test('an existing player with no gender gets the row gender on confirm', function () {
+    $session = PlaySession::factory()->create();
+    $ana = Player::factory()->for($session->club)->create(['name' => 'Ana', 'gender' => null]);
+
+    $rows = impRows($session->club, $session, 'Ana | gender=woman');
+
+    expect($rows[0]['status'])->toBe('existing')->and($rows[0]['warnings'])->toBe([]);
+
+    $result = imp()->confirm($session, $rows);
+
+    expect($result['listed'])->toBe(1)->and($ana->fresh()->gender)->toBe(Gender::Woman);
+});
+
+test('an existing player with no gender and a row with none stays blank', function () {
+    $session = PlaySession::factory()->create();
+    $ana = Player::factory()->for($session->club)->create(['name' => 'Ana', 'gender' => null]);
+
+    imp()->confirm($session, impRows($session->club, $session, 'Ana'));
+
+    expect($ana->fresh()->gender)->toBeNull();
+});
+
+test('an existing player with a different gender keeps theirs and the row only warns', function () {
+    $session = PlaySession::factory()->create();
+    $ben = Player::factory()->for($session->club)->create(['name' => 'Ben', 'gender' => Gender::Man]);
+
+    $rows = impRows($session->club, $session, 'Ben | gender=woman');
+
+    expect($rows[0]['status'])->toBe('existing')
+        ->and($rows[0]['message'])->toBeNull()
+        ->and($rows[0]['warnings'])->toBe(['Gender differs: this player is already Man, so the gender in this row is ignored.']);
+
+    // Re-reviewing the row from state does not pile the warning up.
+    $again = imp()->review($session->club, $session, $rows);
+    expect($again[0]['warnings'])->toHaveCount(1);
+
+    $result = imp()->confirm($session, $rows);
+
+    expect($result['listed'])->toBe(1)->and($ben->fresh()->gender)->toBe(Gender::Man);
+});
+
+test('the same gender as the player has no warning', function () {
+    $session = PlaySession::factory()->create();
+    Player::factory()->for($session->club)->create(['name' => 'Ben', 'gender' => Gender::Man]);
+
+    $rows = impRows($session->club, $session, 'Ben | gender=m');
+
+    expect($rows[0]['warnings'])->toBe([])->and($rows[0]['status'])->toBe('existing');
+});
+
+test('a gender set after the review is not overwritten on confirm', function () {
+    $session = PlaySession::factory()->create();
+    $ana = Player::factory()->for($session->club)->create(['name' => 'Ana', 'gender' => null]);
+    $rows = impRows($session->club, $session, 'Ana | gender=woman');
+
+    $ana->forceFill(['gender' => Gender::Man])->save();
+    imp()->confirm($session, $rows);
+
+    expect($ana->fresh()->gender)->toBe(Gender::Man);
+});
+
+test('an already listed player does not get a gender written', function () {
+    $session = PlaySession::factory()->create();
+    $ana = Player::factory()->for($session->club)->create(['name' => 'Ana', 'gender' => null]);
+    listPlayers($session, $ana);
+
+    $rows = impRows($session->club, $session, 'Ana | gender=woman');
+    imp()->confirm($session, $rows);
+
+    expect($rows[0]['status'])->toBe('listed')->and($ana->fresh()->gender)->toBeNull();
+});
+
+test('a forged gender in the row state is rejected on confirm and never written', function () {
+    $session = PlaySession::factory()->create();
+    $ana = Player::factory()->for($session->club)->create(['name' => 'Ana', 'gender' => null]);
+    $rows = impRows($session->club, $session, "Ana\nBen");
+    $rows[0]['gender'] = 'woman; DROP TABLE players';
+    $rows[1]['gender'] = ['man'];
+
+    $result = imp()->confirm($session, $rows);
+
+    // Ana is an error row (invalid text). Ben's array value reads as no gender, so he is created without one.
+    expect($result['errors'])->toBe(1)->and($result['created'])->toBe(1)->and($result['listed'])->toBe(1)
+        ->and($ana->fresh()->gender)->toBeNull()
+        ->and(Player::query()->where('name', 'Ben')->value('gender'))->toBeNull();
+});
+
+test('a forged status and gender on an existing row cannot overwrite a player gender', function () {
+    $session = PlaySession::factory()->create();
+    $ben = Player::factory()->for($session->club)->create(['name' => 'Ben', 'gender' => Gender::Man]);
+    $rows = impRows($session->club, $session, 'Ben');
+    $rows[0]['gender'] = 'woman';
+    $rows[0]['status'] = 'existing';
+    $rows[0]['player_id'] = $ben->id;
+
+    imp()->confirm($session, $rows);
+
+    expect($ben->fresh()->gender)->toBe(Gender::Man);
+});
+
+test('the form selection carries the gender of new players', function () {
+    $session = PlaySession::factory()->create();
+
+    $selection = imp()->selection($session->club, $session, impRows($session->club, $session, "Ana | gender=w\nBen"));
+
+    expect(array_column($selection['new_players'], 'gender'))->toBe(['woman', '']);
+
+    app(SessionFormService::class)->save($session->club, $session, [], [], $selection['new_players']);
+
+    expect(Player::query()->where('name', 'Ana')->value('gender'))->toBe(Gender::Woman)
+        ->and(Player::query()->where('name', 'Ben')->value('gender'))->toBeNull();
+});
+
+test('a player deactivated after the review gets no gender and is skipped as an error', function () {
+    $session = PlaySession::factory()->create();
+    $ana = Player::factory()->for($session->club)->create(['name' => 'Ana', 'gender' => null]);
+    $rows = impRows($session->club, $session, 'Ana | gender=woman');
+
+    $ana->forceFill(['active' => false])->save();
+    $result = imp()->confirm($session, $rows);
+
+    expect($result['errors'])->toBe(1)->and($result['listed'])->toBe(0)
+        ->and($ana->fresh()->gender)->toBeNull();
+});
+
+test('a player deactivated at the lock-time check gets no gender and is skipped with a note', function () {
+    $session = PlaySession::factory()->create();
+    $ana = Player::factory()->for($session->club)->create(['name' => 'Ana', 'gender' => null]);
+    $rows = impRows($session->club, $session, "Ana | gender=woman\nCara New");
+
+    // After confirm's own re-review, exactly when the new player is created.
+    Player::creating(function () use ($ana): void {
+        Player::query()->whereKey($ana->id)->update(['active' => false]);
+    });
+
+    $result = imp()->confirm($session, $rows);
+
+    expect($result['errors'])->toBe(1)->and($result['created'])->toBe(1)->and($result['listed'])->toBe(1)
+        ->and($result['notes'][0])->toContain('Ana')
+        ->and($ana->fresh()->gender)->toBeNull()
+        ->and(SessionListPlayer::query()->where('player_id', $ana->id)->exists())->toBeFalse();
 });

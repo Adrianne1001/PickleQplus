@@ -2,13 +2,17 @@
 
 namespace App\Domain\PlayerList;
 
+use App\Enums\Gender;
+
 /**
  * Pure parser for a pasted player list (Phase 16). No framework dependencies.
  *
  * UTF-8 text, at most 20 KB and 200 non-blank lines, one player per line. Leading numbering and
  * bullets (`1.`, `1)`, `1 -`, `#1`, `-`, `*`, `•`) are stripped; whitespace is trimmed and
  * collapsed. Optional details follow the name, separated by `|`: `rating=4.2`, `duprId=ABC123`
- * (keys are case-insensitive; `dupr_id`, `duprid` and `dupr` are accepted). Unknown keys are ignored
+ * (keys are case-insensitive; `dupr_id`, `duprid` and `dupr` are accepted) and `gender=woman` (keys `gender`,
+ * `g`, `sex`; `man`/`m`/`male` and `woman`/`w`/`f`/`female`, any case; an unrecognised value is kept
+ * as typed so the review can flag it). Unknown keys are ignored
  * with a row warning.
  */
 final class PasteListParser
@@ -58,6 +62,7 @@ final class PasteListParser
 
         $rating = '';
         $duprId = '';
+        $gender = '';
         $warnings = [];
         foreach ($segments as $segment) {
             $segment = self::collapse($segment);
@@ -79,12 +84,15 @@ final class PasteListParser
                 $rating = $value;
             } elseif (in_array($key, ['duprid', 'dupr_id', 'dupr'], true)) {
                 $duprId = $value;
+            } elseif (in_array($key, ['gender', 'g', 'sex'], true)) {
+                $parsed = Gender::tryParse($value);
+                $gender = $parsed === null ? $value : $parsed->value;
             } else {
                 $warnings[] = 'Ignored unknown detail "'.self::shorten($key).'".';
             }
         }
 
-        return new PastedPlayer($lineNo, $name, $rating, $duprId, $warnings);
+        return new PastedPlayer($lineNo, $name, $rating, $duprId, $warnings, $gender);
     }
 
     /** Remove leading list numbering and bullets, up to three times (e.g. "- 1. Ana"). */

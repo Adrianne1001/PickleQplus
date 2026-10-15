@@ -88,3 +88,38 @@ test('text that is not UTF-8 is an error and a BOM is ignored', function () {
     expect(PasteListParser::parse("Ana\xFF\xFE")->error)->toContain('UTF-8')
         ->and(pastedNames("\xEF\xBB\xBFJosé Álvarez"))->toBe(['José Álvarez']);
 });
+
+// --- gender (P16.8) ---
+
+test('gender is read from the gender, g and sex keys, in any case', function () {
+    $players = PasteListParser::parse("Ana | gender=woman\nBen | G=man\nCara | SEX = Woman\nDan | Gender=MAN")->players;
+
+    expect(array_map(fn ($p): string => $p->gender, $players))->toBe(['woman', 'man', 'woman', 'man'])
+        ->and($players[0]->warnings)->toBe([]);
+});
+
+test('gender values are normalised to man or woman', function () {
+    $genders = fn (string $value): string => PasteListParser::parse("Ana | gender={$value}")->players[0]->gender;
+
+    foreach (['man', 'm', 'male', 'MALE', ' M '] as $value) {
+        expect($genders($value))->toBe('man');
+    }
+    foreach (['woman', 'w', 'f', 'female', 'Female', 'W'] as $value) {
+        expect($genders($value))->toBe('woman');
+    }
+});
+
+test('an unrecognised gender keeps its raw text for the review to flag, and an absent or blank one is empty', function () {
+    $players = PasteListParser::parse("Ana | gender=other\nBen | rating=4\nCara | gender=")->players;
+
+    expect($players[0]->gender)->toBe('other')
+        ->and($players[0]->warnings)->toBe([])
+        ->and($players[1]->gender)->toBe('')
+        ->and($players[2]->gender)->toBe('');
+});
+
+test('gender combines with the other details in any order', function () {
+    $p = PasteListParser::parse('1. Ana Reyes | gender=f | rating=4.2 | duprId=ABC123')->players[0];
+
+    expect($p->name)->toBe('Ana Reyes')->and($p->gender)->toBe('woman')->and($p->rating)->toBe('4.2')->and($p->duprId)->toBe('ABC123');
+});

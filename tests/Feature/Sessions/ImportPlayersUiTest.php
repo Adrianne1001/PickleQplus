@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\Gender;
 use App\Livewire\Sessions\CheckInPanel;
 use App\Livewire\Sessions\ImportPlayers;
 use App\Models\Club;
@@ -38,9 +39,10 @@ test('the modal has both tabs, the helper copy and a disabled-while-empty Review
         ->assertSee('Reclub link')
         ->assertSee('Copy from a group chat, notes, or Reclub. One player per line. Numbers are optional.')
         ->assertSeeHtml('placeholder="1. Ana / 2. Miguel / 3. Bea"')
-        ->assertSee('Include ratings or DUPR IDs')
+        ->assertSee('Include ratings, DUPR IDs or gender')
         ->assertSee('Add details after each name. You can review and edit them before adding players.')
-        ->assertSee('Ana | rating=4.2 | duprId=23Q432')
+        ->assertSee('Ana | rating=4.2 | duprId=23Q432 | gender=woman')
+        ->assertSee('Gender is optional: man or woman')
         ->assertSeeHtml('data-test="import-review-button"')
         ->assertSeeHtml("x-bind:disabled=\"! (\$wire.text ?? '').trim()\"")
         ->assertSee('Paste your Reclub event link.')
@@ -103,6 +105,46 @@ test('an empty paste is refused with a message', function () {
         ->assertHasErrors('paste')
         ->assertSeeHtml('data-test="import-paste-error"')
         ->assertSet('step', 'input');
+});
+
+test('each review row has a gender select; choosing one updates the row and re-matches', function () {
+    [$owner, $club, $session] = importWorld();
+    Player::factory()->for($club)->create(['name' => 'Bea', 'gender' => Gender::Man]);
+
+    $component = importList($owner, $club, $session)
+        ->set('text', "Ana | gender=woman\nBea | gender=w\nCy")
+        ->call('reviewPaste')
+        ->assertSeeHtml('data-test="import-row-gender"')
+        ->assertSee('Not set');
+
+    expect(substr_count($component->html(), 'data-test="import-row-gender"'))->toBe(3)
+        ->and(collect($component->get('rows'))->pluck('gender')->all())->toBe(['woman', 'woman', '']);
+    // Bea is already a Man, so the pasted gender is ignored with a warning.
+    $component->assertSee('Gender differs');
+
+    $component->set('rows.2.gender', 'man');
+    expect($component->get('rows.2.gender'))->toBe('man')
+        ->and($component->get('rows.2.status'))->toBe('new');
+
+    $component->set('rows.1.gender', 'man');
+    expect($component->get('rows.1.warnings'))->toBe([])
+        ->and($component->get('rows.1.status'))->toBe('existing');
+});
+
+test('an unrecognised pasted gender is an error row with its message, and picking a gender fixes it', function () {
+    [$owner, $club, $session] = importWorld();
+
+    $component = importList($owner, $club, $session)
+        ->set('text', 'Ana | gender=robot')
+        ->call('reviewPaste')
+        ->assertSeeHtml('data-test="import-row-gender"')
+        ->assertSee('Gender must be man or woman.');
+
+    expect($component->get('rows.0.status'))->toBe('error');
+
+    $component->set('rows.0.gender', 'woman')
+        ->assertDontSee('Gender must be man or woman.');
+    expect($component->get('rows.0.status'))->toBe('new');
 });
 
 test('rows show errors and warnings, and an edit re-matches the row', function () {
@@ -325,4 +367,31 @@ test('the board panel re-renders with the import child mounted and the import st
         ->call('reviewPaste')
         ->call('confirm')
         ->assertHasNoErrors();
+});
+
+test('rows carry a gender that staff can edit, which re-matches and is written on add (P16.8)', function () {
+    [$owner, $club, $session] = importWorld();
+    Player::factory()->for($club)->create(['name' => 'Ben', 'gender' => Gender::Man]);
+
+    $component = importList($owner, $club, $session)
+        ->set('text', "Ana | gender=f\nBen | gender=woman\nCy")
+        ->call('reviewPaste')
+        ->assertHasNoErrors();
+
+    expect(collect($component->get('rows'))->pluck('gender')->all())->toBe(['woman', 'woman', ''])
+        ->and($component->get('rows')[1]['warnings'])->toHaveCount(1);
+
+    $component->set('rows.0.gender', 'robot');
+    expect($component->get('rows')[0]['status'])->toBe('error')
+        ->and($component->get('rows')[0]['message'])->toBe('Gender must be man or woman.');
+
+    $component->set('rows.0.gender', 'man')->set('rows.2.gender', 'Woman');
+    expect(collect($component->get('rows'))->pluck('gender')->all())->toBe(['man', 'woman', 'woman'])
+        ->and($component->get('rows')[1]['warnings'])->toHaveCount(1);
+
+    $component->call('confirm')->assertHasNoErrors();
+
+    expect(Player::query()->where('name', 'Ana')->value('gender'))->toBe(Gender::Man)
+        ->and(Player::query()->where('name', 'Cy')->value('gender'))->toBe(Gender::Woman)
+        ->and(Player::query()->where('name', 'Ben')->value('gender'))->toBe(Gender::Man);
 });

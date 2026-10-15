@@ -13,6 +13,7 @@ final class PastedPlayer
      * @param  string  $rating  Raw `rating=` value, '' when absent.
      * @param  string  $duprId  Raw DUPR ID value, '' when absent.
      * @param  list<string>  $warnings
+     * @param  string  $gender  `man` or `woman` when the `gender=` value was recognised, its raw text when not, '' when absent.
      */
     public function __construct(
         public readonly int $line,
@@ -20,5 +21,6 @@ final class PastedPlayer
         public readonly string $rating = '',
         public readonly string $duprId = '',
         public readonly array $warnings = [],
+        public readonly string $gender = '',
     ) {}
 }

@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Domain\PlayerList\PastedPlayer;
 use App\Domain\PlayerList\PasteListParser;
+use App\Enums\Gender;
 use App\Enums\ListSource;
 use App\Events\PlaySessionChanged;
 use App\Models\Club;
@@ -21,19 +22,23 @@ use LogicException;
  * Import player list (Phase 16): paste or Reclub link -> review rows -> confirm.
  *
  * A review row is a plain array, so it can live in Livewire state. Only the editable fields
- * (`name`, `rating`, `dupr_id`) and `source` are ever trusted: every review and the confirm re-run
+ * (`name`, `rating`, `dupr_id`, `gender`) and `source` are ever trusted: every review and the confirm re-run
  * the matching from them, so the other keys (status, player_id, message) can't be forged.
  *
  * Matching is inside the club: by DUPR ID first, then by case-insensitive name. The import never
- * changes an existing player's details.
+ * changes an existing player's details, with one exception (P16.8): a row's gender is set on an
+ * existing player who has none. A gender is never overwritten; a differing one is a row warning.
+ *
+ * A row's `gender` is '' (none), `man` or `woman`. Any other text is kept as typed so the row can
+ * show the error "Gender must be man or woman." (the value is never written).
  *
  * Error keys: `paste`, `reclub` (parse / fetch problems), `players` (guest caps at confirm),
  * `session` (ended or expired).
  *
- * @phpstan-type InputRow array{line?: int, name?: mixed, rating?: mixed, dupr_id?: mixed, source?: mixed, warnings?: mixed}
- * @phpstan-type ReviewRow array{line: int, name: string, rating: string, dupr_id: string, source: string, warnings: list<string>, status: 'existing'|'new'|'listed'|'error', player_id: int|null, player_name: string|null, message: string|null}
+ * @phpstan-type InputRow array{line?: int, name?: mixed, rating?: mixed, dupr_id?: mixed, gender?: mixed, source?: mixed, warnings?: mixed}
+ * @phpstan-type ReviewRow array{line: int, name: string, rating: string, dupr_id: string, gender: string, source: string, warnings: list<string>, status: 'existing'|'new'|'listed'|'error', player_id: int|null, player_name: string|null, message: string|null}
  * @phpstan-type ConfirmResult array{listed: int, created: int, already_listed: int, errors: int, notes: list<string>}
- * @phpstan-type Selection array{player_ids: list<array{id: int, source: string}>, new_players: list<array{name: string, stars: null, dupr_id: string|null, dupr_rating: string|null, source: string}>, already_listed: int, errors: int}
+ * @phpstan-type Selection array{player_ids: list<array{id: int, source: string, gender: string}>, new_players: list<array{name: string, stars: null, dupr_id: string|null, dupr_rating: string|null, gender: string, source: string}>, already_listed: int, errors: int}
  */
 class PlayerListImportService
 {
@@ -46,6 +51,11 @@ class PlayerListImportService
     public const STATUS_LISTED = 'listed';
 
     public const STATUS_ERROR = 'error';
+
+    public const GENDER_ERROR = 'Gender must be man or woman.';
+
+    /** Start of the computed warning for a gender that differs from the player's. Stripped from incoming rows, so it never piles up on re-reviews. */
+    public const GENDER_WARNING = 'Gender differs: ';
 
     public function __construct(
         private readonly PlayerService $players,
@@ -75,6 +85,7 @@ class PlayerListImportService
                 'name' => $p->name,
                 'rating' => $p->rating,
                 'dupr_id' => $p->duprId,
+                'gender' => $p->gender,
                 'source' => ListSource::Paste->value,
                 'warnings' => $p->warnings,
             ],
@@ -96,7 +107,7 @@ class PlayerListImportService
 
         $rows = [];
         foreach ($event->players as $i => $name) {
-            $rows[] = ['line' => $i + 1, 'name' => $name, 'rating' => '', 'dupr_id' => '', 'source' => ListSource::Reclub->value, 'warnings' => []];
+            $rows[] = ['line' => $i + 1, 'name' => $name, 'rating' => '', 'dupr_id' => '', 'gender' => '', 'source' => ListSource::Reclub->value, 'warnings' => []];
         }
 
         return $this->review($club, $session, $rows, $alsoListed);
@@ -122,7 +133,7 @@ class PlayerListImportService
         $byName = [];
         /** @var array<string, Player> $byDuprId */
         $byDuprId = [];
-        foreach (Player::query()->where('club_id', $club->id)->get(['id', 'club_id', 'name', 'dupr_id', 'active']) as $player) {
+        foreach (Player::query()->where('club_id', $club->id)->get(['id', 'club_id', 'name', 'dupr_id', 'gender', 'active']) as $player) {
             $byName[$this->nameKey($player->name)] ??= $player;
             if ($player->dupr_id !== null) {
                 $byDuprId[$player->dupr_id] = $player;
@@ -145,6 +156,9 @@ class PlayerListImportService
             $duprId = DuprPlayerId::normalize($row['dupr_id']);
 
             $errors = $this->roster->validateRow($row['name'], $duprId, $row['rating'] === '' ? null : $row['rating']);
+            if ($row['gender'] !== '' && Gender::tryParse($row['gender']) === null) {
+                $errors[] = self::GENDER_ERROR;
+            }
             if ($errors === [] && isset($seenNames[$nameKey])) {
                 $errors[] = 'This name is repeated in the list.';
             }
@@ -183,13 +197,24 @@ class PlayerListImportService
 
             if ($match === null) {
                 $out[] = $this->result($row, self::STATUS_NEW, null, null);
-            } elseif (! $match->active) {
-                $out[] = $this->result($row, self::STATUS_ERROR, $match, 'This player is deactivated. Reactivate them on the Players page first.');
-            } elseif (isset($listed[$match->id])) {
-                $out[] = $this->result($row, self::STATUS_LISTED, $match, 'Already on the list.');
-            } else {
-                $out[] = $this->result($row, self::STATUS_EXISTING, $match, null);
+
+                continue;
             }
+
+            if (! $match->active) {
+                $out[] = $this->result($row, self::STATUS_ERROR, $match, 'This player is deactivated. Reactivate them on the Players page first.');
+
+                continue;
+            }
+
+            // The player keeps their gender: a different one in the row is only a heads-up.
+            if ($row['gender'] !== '' && $match->gender !== null && $match->gender->value !== $row['gender']) {
+                $row['warnings'][] = self::GENDER_WARNING.'this player is already '.$match->gender->label().', so the gender in this row is ignored.';
+            }
+
+            $out[] = isset($listed[$match->id])
+                ? $this->result($row, self::STATUS_LISTED, $match, 'Already on the list.')
+                : $this->result($row, self::STATUS_EXISTING, $match, null);
         }
 
         return $out;
@@ -256,6 +281,8 @@ class PlayerListImportService
             }
 
             $picks = [];
+            /** @var array<int, string> $genderFills player id => gender to set when the player has none */
+            $genderFills = [];
             $created = 0;
             $alreadyListed = 0;
             $errors = 0;
@@ -267,6 +294,9 @@ class PlayerListImportService
                     $errors++;
                 } elseif ($row['status'] === self::STATUS_EXISTING && $row['player_id'] !== null) {
                     $picks[] = ['id' => $row['player_id'], 'source' => $row['source']];
+                    if ($row['gender'] !== '') {
+                        $genderFills[$row['player_id']] = $row['gender'];
+                    }
                 } elseif ($row['status'] === self::STATUS_NEW) {
                     try {
                         $player = $this->players->create($club, $this->newPlayerData($row));
@@ -289,7 +319,7 @@ class PlayerListImportService
                     ->whereIn('id', array_column($picks, 'id'))
                     ->orderBy('id')
                     ->lockForUpdate()
-                    ->get(['id', 'name', 'active'])
+                    ->get()
                     ->keyBy('id');
                 $usable = [];
                 foreach ($picks as $pick) {
@@ -299,6 +329,10 @@ class PlayerListImportService
                         $notes[] = ($player->name ?? 'A player').': is deactivated. Reactivate them on the Players page first.';
 
                         continue;
+                    }
+                    // Set, never overwrite: judged on the locked row, so a gender set since the review stays.
+                    if ($player->gender === null && isset($genderFills[$player->id])) {
+                        $this->players->update($player, ['gender' => $genderFills[$player->id]]);
                     }
                     $usable[] = $pick;
                 }
@@ -331,7 +365,8 @@ class PlayerListImportService
         $errors = 0;
         foreach ($this->review($club, $session, $rows, $alsoListed) as $row) {
             if ($row['status'] === self::STATUS_EXISTING && $row['player_id'] !== null) {
-                $playerIds[] = ['id' => $row['player_id'], 'source' => $row['source']];
+                // The gender is only a request: SessionFormService::save sets it when the player has none.
+                $playerIds[] = ['id' => $row['player_id'], 'source' => $row['source'], 'gender' => $row['gender']];
             } elseif ($row['status'] === self::STATUS_NEW) {
                 $data = $this->newPlayerData($row);
                 $newPlayers[] = [
@@ -339,6 +374,7 @@ class PlayerListImportService
                     'stars' => null,
                     'dupr_id' => $data['dupr_id'],
                     'dupr_rating' => isset($data['dupr_rating']) ? (string) $data['dupr_rating'] : null,
+                    'gender' => $row['gender'],
                     'source' => $row['source'],
                 ];
             } elseif ($row['status'] === self::STATUS_LISTED) {
@@ -355,11 +391,15 @@ class PlayerListImportService
      * What PlayerService::create takes for a new row.
      *
      * @param  ReviewRow  $row
-     * @return array{name: string, dupr_id: string|null, dupr_rating?: string, stars?: int, stars_pending?: bool, rating_source?: string}
+     * @return array{name: string, dupr_id: string|null, gender: string|null, dupr_rating?: string, stars?: int, stars_pending?: bool, rating_source?: string}
      */
     private function newPlayerData(array $row): array
     {
-        $data = ['name' => $row['name'], 'dupr_id' => DuprPlayerId::normalize($row['dupr_id'])];
+        $data = [
+            'name' => $row['name'],
+            'dupr_id' => DuprPlayerId::normalize($row['dupr_id']),
+            'gender' => $row['gender'] === '' ? null : $row['gender'],
+        ];
 
         if ($row['rating'] !== '') {
             // A pasted rating sets the DUPR rating; the stars come from the club's bands.
@@ -376,7 +416,7 @@ class PlayerListImportService
     /**
      * The row as the client sent it, reduced to safe strings (it may have been tampered with).
      *
-     * @return array{line: int, name: string, rating: string, dupr_id: string, source: string, warnings: list<string>}
+     * @return array{line: int, name: string, rating: string, dupr_id: string, gender: string, source: string, warnings: list<string>}
      */
     private function normalised(mixed $input): array
     {
@@ -384,7 +424,7 @@ class PlayerListImportService
         $warnings = [];
         if (is_array($input['warnings'] ?? null)) {
             foreach ($input['warnings'] as $warning) {
-                if (is_string($warning)) {
+                if (is_string($warning) && ! str_starts_with($warning, self::GENDER_WARNING)) {
                     $warnings[] = mb_substr($warning, 0, 200);
                 }
             }
@@ -395,9 +435,23 @@ class PlayerListImportService
             'name' => $this->text($input['name'] ?? null),
             'rating' => $this->text($input['rating'] ?? null),
             'dupr_id' => $this->text($input['dupr_id'] ?? null),
+            'gender' => $this->gender($input['gender'] ?? null),
             'source' => ListSource::fromInput($input['source'] ?? null) === ListSource::Reclub ? ListSource::Reclub->value : ListSource::Paste->value,
             'warnings' => array_slice($warnings, 0, 10),
         ];
+    }
+
+    /**
+     * '' for none, `man` or `woman` for a recognised value (any alias or case), else the text as typed
+     * (capped), which the review turns into an error.
+     */
+    private function gender(mixed $value): string
+    {
+        $text = mb_substr($this->text($value), 0, 30);
+
+        $parsed = Gender::tryParse($text);
+
+        return $parsed === null ? $text : $parsed->value;
     }
 
     private function text(mixed $value): string
@@ -410,7 +464,7 @@ class PlayerListImportService
     }
 
     /**
-     * @param  array{line: int, name: string, rating: string, dupr_id: string, source: string, warnings: list<string>}  $row
+     * @param  array{line: int, name: string, rating: string, dupr_id: string, gender: string, source: string, warnings: list<string>}  $row
      * @param  'existing'|'new'|'listed'|'error'  $status
      * @return ReviewRow
      */

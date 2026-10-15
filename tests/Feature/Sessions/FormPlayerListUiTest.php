@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\Gender;
 use App\Livewire\Sessions\Form;
 use App\Models\Club;
 use App\Models\Player;
@@ -9,6 +10,9 @@ use App\Models\SessionPlayer;
 use App\Models\User;
 use App\Services\CheckInService;
 use App\Services\PlayerListImportService;
+use App\Services\SessionFormService;
+use Illuminate\Validation\ValidationException;
+use Livewire\Features\SupportLockedProperties\CannotUpdateLockedPropertyException;
 use Livewire\Livewire;
 
 /** @return array{0: User, 1: Club} */
@@ -192,4 +196,130 @@ test('the import is hidden when the session has ended', function () {
     Livewire::actingAs($owner)->test(Form::class, ['club' => $club, 'session' => $session])
         ->dispatch('import-rows', rows: [])
         ->assertForbidden();
+});
+
+// --- gender on the form's import (P16.8) ---
+
+test('Save sets the gender of imported existing players who have none and never overwrites one', function () {
+    [$owner, $club] = formWorld();
+    $ana = Player::factory()->for($club)->create(['name' => 'Ana', 'gender' => null]);
+    $ben = Player::factory()->for($club)->create(['name' => 'Ben', 'gender' => Gender::Man]);
+    $cy = Player::factory()->for($club)->create(['name' => 'Cy', 'gender' => null]);
+
+    $form = Livewire::actingAs($owner)->test(Form::class, ['club' => $club])
+        ->dispatch('import-rows', rows: formRows($club, "Ana | gender=f\nBen | gender=woman\nCy\nDee | gender=m"))
+        ->assertHasNoErrors()
+        ->assertSet('pickGenders', [$ana->id => 'woman', $ben->id => 'woman']);
+
+    // Nothing is written until Save.
+    expect($ana->fresh()->gender)->toBeNull();
+
+    $form->call('save')->assertHasNoErrors();
+
+    expect($ana->fresh()->gender)->toBe(Gender::Woman)
+        ->and($ben->fresh()->gender)->toBe(Gender::Man)
+        ->and($cy->fresh()->gender)->toBeNull()
+        ->and(Player::where('club_id', $club->id)->where('name', 'Dee')->value('gender'))->toBe(Gender::Man);
+});
+
+test('a forged gender on an imported row is an error row in the form and writes nothing', function () {
+    [$owner, $club] = formWorld();
+    $ana = Player::factory()->for($club)->create(['name' => 'Ana', 'gender' => null]);
+    $rows = formRows($club, 'Ana');
+    $rows[0]['gender'] = 'robot';
+
+    $form = Livewire::actingAs($owner)->test(Form::class, ['club' => $club])
+        ->dispatch('import-rows', rows: $rows)
+        ->assertSet('pickedIds', [])
+        ->assertSet('pickGenders', []);
+
+    $form->call('save')->assertHasNoErrors();
+
+    expect($ana->fresh()->gender)->toBeNull();
+});
+
+test('the form save rejects a forged pick gender and rolls everything back', function () {
+    [, $club] = formWorld();
+    $ana = Player::factory()->for($club)->create(['name' => 'Ana', 'gender' => null]);
+    $ben = Player::factory()->for($club)->create(['name' => 'Ben', 'gender' => null]);
+
+    foreach (['robot', ['woman'], 5] as $forged) {
+        try {
+            app(SessionFormService::class)->save($club, null, [
+                'name' => 'Friday', 'date' => now()->toDateString(), 'courts' => 2,
+            ], [
+                ['id' => $ben->id, 'source' => 'paste', 'gender' => 'm'],
+                ['id' => $ana->id, 'source' => 'paste', 'gender' => $forged],
+            ]);
+            $this->fail('A forged gender must be rejected.');
+        } catch (ValidationException $e) {
+            expect($e->errors())->toHaveKey('players');
+        }
+    }
+
+    expect($ana->fresh()->gender)->toBeNull()
+        ->and($ben->fresh()->gender)->toBeNull()
+        ->and(PlaySession::where('club_id', $club->id)->exists())->toBeFalse();
+});
+
+test('the form save sets a blank gender on an existing session edit too, and a pick without a gender changes nothing', function () {
+    [, $club] = formWorld();
+    $session = PlaySession::factory()->for($club)->create();
+    $ana = Player::factory()->for($club)->create(['name' => 'Ana', 'gender' => null]);
+    $ben = Player::factory()->for($club)->create(['name' => 'Ben', 'gender' => null]);
+
+    app(SessionFormService::class)->save($club, $session, [], [
+        ['id' => $ana->id, 'source' => 'paste', 'gender' => 'W'],
+        ['id' => $ben->id, 'source' => 'manual'],
+    ]);
+
+    expect($ana->fresh()->gender)->toBe(Gender::Woman)->and($ben->fresh()->gender)->toBeNull();
+});
+
+test('a failure after the gender write rolls the write back and creates no session', function () {
+    [, $club] = formWorld();
+    $ana = Player::factory()->for($club)->create(['name' => 'Ana', 'gender' => null]);
+    $foreign = Player::factory()->for(Club::factory()->create())->create(['name' => 'Fran', 'gender' => null]);
+
+    // Ana's gender is written first; the foreign pick then fails the list write, so everything must roll back.
+    try {
+        app(SessionFormService::class)->save($club, null, [
+            'name' => 'Friday', 'date' => now()->toDateString(), 'courts' => 2,
+        ], [
+            ['id' => $ana->id, 'source' => 'paste', 'gender' => 'w'],
+            ['id' => $foreign->id, 'source' => 'paste'],
+        ]);
+        $this->fail('The foreign pick must fail the save.');
+    } catch (ValidationException $e) {
+        expect($e->errors())->toHaveKey('players');
+    }
+
+    expect($ana->fresh()->gender)->toBeNull()
+        ->and($foreign->fresh()->gender)->toBeNull()
+        ->and(PlaySession::where('club_id', $club->id)->exists())->toBeFalse();
+});
+
+test('a gender pick for another club\'s player writes nothing to that player', function () {
+    [, $club] = formWorld();
+    $foreign = Player::factory()->for(Club::factory()->create())->create(['name' => 'Fran', 'gender' => null]);
+
+    try {
+        app(SessionFormService::class)->save($club, null, [
+            'name' => 'Friday', 'date' => now()->toDateString(), 'courts' => 2,
+        ], [['id' => $foreign->id, 'source' => 'paste', 'gender' => 'woman']]);
+        $this->fail('A foreign player must fail the save.');
+    } catch (ValidationException $e) {
+        expect($e->errors())->toHaveKey('players');
+    }
+
+    expect($foreign->fresh()->gender)->toBeNull()
+        ->and(PlaySession::where('club_id', $club->id)->exists())->toBeFalse();
+});
+
+test('pickGenders is locked against client updates', function () {
+    [$owner, $club] = formWorld();
+    $ana = Player::factory()->for($club)->create(['name' => 'Ana', 'gender' => null]);
+
+    expect(fn () => Livewire::actingAs($owner)->test(Form::class, ['club' => $club])->set('pickGenders', [$ana->id => 'woman']))
+        ->toThrow(CannotUpdateLockedPropertyException::class);
 });

@@ -21,7 +21,7 @@
             <div>
                 <flux:heading size="lg">{{ __('Import player list') }}</flux:heading>
                 @if ($step === 'review')
-                    <flux:text class="mt-1">{{ __('Review the players below. Fix a name, rating or DUPR ID, or remove a row, before adding them.') }}</flux:text>
+                    <flux:text class="mt-1">{{ __('Review the players below. Fix a name, rating, DUPR ID or gender, or remove a row, before adding them.') }}</flux:text>
                 @endif
             </div>
 
@@ -70,12 +70,13 @@
 
                     <details class="group rounded-xl border border-zinc-200 px-4 py-3 dark:border-zinc-700" data-test="import-details-help">
                         <summary class="flex min-h-8 cursor-pointer list-none items-center justify-between gap-2 text-sm font-semibold text-zinc-900 focus-visible:outline-2 focus-visible:outline-brand-600 dark:text-white">
-                            {{ __('Include ratings or DUPR IDs') }}
+                            {{ __('Include ratings, DUPR IDs or gender') }}
                             <flux:icon.chevron-down class="size-4 shrink-0 transition-transform group-open:rotate-180" />
                         </summary>
                         <div class="mt-3 space-y-2 text-sm text-zinc-700 dark:text-zinc-300">
                             <p>{{ __('Add details after each name. You can review and edit them before adding players.') }}</p>
-                            <code class="block overflow-x-auto rounded-lg bg-zinc-100 px-3 py-2 font-mono text-sm text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100">Ana | rating=4.2 | duprId=23Q432</code>
+                            <code class="block overflow-x-auto rounded-lg bg-zinc-100 px-3 py-2 font-mono text-sm text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100">Ana | rating=4.2 | duprId=23Q432 | gender=woman</code>
+                            <p>{{ __('Gender is optional: man or woman (m, w, male and female also work).') }}</p>
                         </div>
                     </details>
 
@@ -179,12 +180,20 @@
                                     <p class="text-sm text-amber-800 dark:text-amber-300" data-test="import-row-warning">{{ $warning }}</p>
                                 @endforeach
 
-                                <div class="grid grid-cols-2 items-end gap-3 sm:grid-cols-[minmax(0,1fr)_6rem_8rem_auto]">
+                                <div class="grid grid-cols-2 items-end gap-3 sm:grid-cols-[minmax(0,1fr)_5rem_7rem_8rem_auto]">
                                     <div class="col-span-2 sm:col-span-1">
                                         <flux:input wire:model.blur="rows.{{ $i }}.name" size="sm" :label="__('Name')" maxlength="120" autocomplete="off" data-test="import-row-name" />
                                     </div>
                                     <flux:input wire:model.blur="rows.{{ $i }}.rating" size="sm" :label="__('Rating')" inputmode="decimal" placeholder="4.2" autocomplete="off" data-test="import-row-rating" />
                                     <flux:input wire:model.blur="rows.{{ $i }}.dupr_id" size="sm" :label="__('DUPR ID')" maxlength="6" class="uppercase" autocomplete="off" data-test="import-row-dupr" />
+                                    {{-- An unrecognised pasted value is not one of the options, so the select shows blank until the user picks one. --}}
+                                    <div class="col-span-2 sm:col-span-1">
+                                        <flux:select wire:model.live="rows.{{ $i }}.gender" size="sm" :label="__('Gender')" data-test="import-row-gender">
+                                            <flux:select.option value="">{{ __('Not set') }}</flux:select.option>
+                                            <flux:select.option value="man">{{ __('Man') }}</flux:select.option>
+                                            <flux:select.option value="woman">{{ __('Woman') }}</flux:select.option>
+                                        </flux:select>
+                                    </div>
                                     <flux:button type="button" size="sm" variant="ghost" icon="x-mark" class="col-span-2 min-h-11 justify-self-end sm:col-span-1 sm:min-w-11" wire:click="dropRow({{ $i }})" aria-label="{{ __('Remove :name from the import', ['name' => ($row['name'] ?? '') !== '' ? $row['name'] : '#'.($i + 1)]) }}" data-test="import-row-drop">
                                         <span class="sm:sr-only">{{ __('Remove row') }}</span>
                                     </flux:button>

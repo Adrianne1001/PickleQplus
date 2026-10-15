@@ -84,6 +84,15 @@ class Form extends Component
     public array $pickSources = [];
 
     /**
+     * Gender an import asked to set on a picked player, keyed by player id (`man` or `woman`).
+     * SessionFormService::save sets it only when the player has none.
+     *
+     * @var array<int, string>
+     */
+    #[Locked]
+    public array $pickGenders = [];
+
+    /**
      * Players to create and list on Save. Blank stars and no rating mean "skill not set" (3 stars, pending).
      *
      * @var list<array{name: string, stars: ?int, dupr_id: ?string, gender?: string, dupr_rating?: ?string, source?: string}>
@@ -258,7 +267,7 @@ class Form extends Component
         }
         $this->authorize($this->session === null ? 'create' : 'update', $this->session ?? [PlaySession::class, $this->club]);
         $user = auth()->user();
-        $picks = array_map(fn (int $id): array => ['id' => $id, 'source' => $this->pickSources[$id] ?? 'manual'], $this->pickedIds);
+        $picks = array_map(fn (int $id): array => ['id' => $id, 'source' => $this->pickSources[$id] ?? 'manual', 'gender' => $this->pickGenders[$id] ?? ''], $this->pickedIds);
         $session = app(SessionFormService::class)->save($this->club, $this->session, $data, $picks, $this->newPlayers, $user instanceof User ? $user : null);
 
         $this->redirectRoute('clubs.sessions.show', [$this->club, $session], navigate: true);
@@ -289,7 +298,7 @@ class Form extends Component
     public function unpick(int $playerId): void
     {
         $this->pickedIds = array_values(array_diff($this->pickedIds, [$playerId]));
-        unset($this->pickSources[$playerId]);
+        unset($this->pickSources[$playerId], $this->pickGenders[$playerId]);
     }
 
     /** Add the inline form's player to the pending list. Nothing is created until Save. */
@@ -336,6 +345,9 @@ class Form extends Component
             if (! in_array($pick['id'], $this->pickedIds, true)) {
                 $this->pickedIds[] = $pick['id'];
                 $this->pickSources[$pick['id']] = $pick['source'];
+                if ($pick['gender'] !== '') {
+                    $this->pickGenders[$pick['id']] = $pick['gender'];
+                }
                 $picked++;
             }
         }
