@@ -4,19 +4,22 @@ namespace App\Livewire\Sessions;
 
 use App\Domain\Rotation\SkillGroups;
 use App\Enums\RotationMode;
-use App\Enums\SessionPlayerStatus;
 use App\Livewire\Sessions\Concerns\QuickAddsPlayer;
 use App\Models\Club;
 use App\Models\Player;
 use App\Models\PlaySession;
-use App\Models\SessionPlayer;
+use App\Models\SessionListPlayer;
+use App\Models\User;
+use App\Services\PlayerListImportService;
 use App\Services\PlaySessionService;
 use App\Services\SessionFormService;
+use App\Services\SessionListService;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Locked;
+use Livewire\Attributes\On;
 use Livewire\Attributes\Title;
 use Livewire\Component;
 
@@ -58,11 +61,14 @@ class Form extends Component
     /** True while waiting for the organizer to confirm a mode change on a live session. */
     public bool $confirmingMode = false;
 
+    /** Optional session password for QR check-in (4 to 32 characters). Blank means none. */
+    public string $checkin_password = '';
+
     /** Player search for the Players section. */
     public string $search = '';
 
     /**
-     * Existing club players to check in on Save. Locked: only pick() may add ids, and it checks the club.
+     * Existing club players to put on the session's list on Save. Locked: only pick() and an import may add ids, and both check the club.
      *
      * @var list<int>
      */
@@ -70,12 +76,28 @@ class Form extends Component
     public array $pickedIds = [];
 
     /**
-     * Players to create and check in on Save.
+     * Where each picked player came from (`manual`, `paste` or `reclub`), keyed by player id.
      *
-     * @var list<array{name: string, stars: int, dupr_id: ?string, gender: string}>
+     * @var array<int, string>
+     */
+    #[Locked]
+    public array $pickSources = [];
+
+    /**
+     * Players to create and list on Save. Blank stars and no rating mean "skill not set" (3 stars, pending).
+     *
+     * @var list<array{name: string, stars: ?int, dupr_id: ?string, gender?: string, dupr_rating?: ?string, source?: string}>
      */
     #[Locked]
     public array $newPlayers = [];
+
+    /**
+     * What the last import added to the form, shown under the Players search.
+     *
+     * @var array{picked: int, new: int, already: int, errors: int, duplicates: int}|null
+     */
+    #[Locked]
+    public ?array $importSummary = null;
 
     public function mount(Club $club, ?PlaySession $session = null): void
     {
@@ -99,6 +121,7 @@ class Form extends Component
             $this->up_next_count = (string) $session->up_next_count;
             $this->auto_fill = $session->auto_fill;
             $this->rotation_mode = $session->rotation_mode->value;
+            $this->checkin_password = (string) $session->checkin_password;
             if ($session->rotation_mode === RotationMode::SkillCourts) {
                 $stored = SkillGroups::tryFromArray($session->mode_settings['skill_groups'] ?? [], $session->courts);
                 if ($stored === null) {
@@ -211,6 +234,7 @@ class Form extends Component
             'up_next_count' => (int) $this->up_next_count,
             'auto_fill' => $this->auto_fill,
             'rotation_mode' => $this->rotation_mode,
+            'checkin_password' => $this->checkin_password,
             'scoring' => array_replace(PlaySessionService::DEFAULT_SCORING, [
                 'to' => (int) $this->to,
                 'win_by' => (int) $this->win_by,
@@ -233,7 +257,9 @@ class Form extends Component
             $this->authorize('create', [Player::class, $this->club]);
         }
         $this->authorize($this->session === null ? 'create' : 'update', $this->session ?? [PlaySession::class, $this->club]);
-        $session = app(SessionFormService::class)->save($this->club, $this->session, $data, $this->pickedIds, $this->newPlayers);
+        $user = auth()->user();
+        $picks = array_map(fn (int $id): array => ['id' => $id, 'source' => $this->pickSources[$id] ?? 'manual'], $this->pickedIds);
+        $session = app(SessionFormService::class)->save($this->club, $this->session, $data, $picks, $this->newPlayers, $user instanceof User ? $user : null);
 
         $this->redirectRoute('clubs.sessions.show', [$this->club, $session], navigate: true);
     }
@@ -243,14 +269,14 @@ class Form extends Component
         $this->quickOpen = false;
     }
 
-    /** Add an existing active club player to the "To check in" list. */
+    /** Add an existing active club player to the "To add" list. */
     public function pick(int $playerId): void
     {
         $this->authorizePlayers();
 
         $player = $this->club->players()->where('active', true)->find($playerId);
-        if ($player === null || in_array($playerId, $this->checkedInIds(), true)) {
-            throw ValidationException::withMessages(['players' => __('That player is not available to check in. Search again.')]);
+        if ($player === null || in_array($playerId, $this->listedIds(), true)) {
+            throw ValidationException::withMessages(['players' => __('That player is not available to add. Search again.')]);
         }
 
         if (! in_array($playerId, $this->pickedIds, true)) {
@@ -263,6 +289,7 @@ class Form extends Component
     public function unpick(int $playerId): void
     {
         $this->pickedIds = array_values(array_diff($this->pickedIds, [$playerId]));
+        unset($this->pickSources[$playerId]);
     }
 
     /** Add the inline form's player to the pending list. Nothing is created until Save. */
@@ -281,12 +308,55 @@ class Form extends Component
 
         $this->newPlayers[] = [
             'name' => $input['name'],
-            'stars' => (int) $input['stars'],
+            // Blank stars stay null: the player is created at 3 stars with "skill not set".
+            'stars' => $input['stars'] === null ? null : (int) $input['stars'],
             'dupr_id' => $input['dupr_id'],
             'gender' => $input['gender'],
         ];
         $this->search = '';
         $this->closeQuickAdd();
+    }
+
+    /**
+     * The import modal confirmed its rows. They come from the browser, so they are re-validated
+     * here: existing players join the picks, new ones wait in the "To add" list until Save.
+     *
+     * @param  list<array<string, mixed>>  $rows
+     */
+    #[On('import-rows')]
+    public function importRows(array $rows): void
+    {
+        $this->authorizePlayers();
+        $this->authorize('create', [Player::class, $this->club]);
+
+        $selection = app(PlayerListImportService::class)->selection($this->club, $this->session, array_slice($rows, 0, 500), $this->pickedIds);
+
+        $picked = 0;
+        foreach ($selection['player_ids'] as $pick) {
+            if (! in_array($pick['id'], $this->pickedIds, true)) {
+                $this->pickedIds[] = $pick['id'];
+                $this->pickSources[$pick['id']] = $pick['source'];
+                $picked++;
+            }
+        }
+
+        $pendingNames = array_map(fn (array $p): string => mb_strtolower($p['name']), $this->newPlayers);
+        $new = 0;
+        $duplicates = 0;
+        foreach ($selection['new_players'] as $row) {
+            $key = mb_strtolower($row['name']);
+            if (in_array($key, $pendingNames, true)) {
+                $duplicates++;
+
+                continue;
+            }
+            $pendingNames[] = $key;
+            $this->newPlayers[] = $row;
+            $new++;
+        }
+
+        $this->importSummary = ['picked' => $picked, 'new' => $new, 'already' => $selection['already_listed'], 'errors' => $selection['errors'], 'duplicates' => $duplicates];
+        $this->resetErrorBag(['new_players', 'players']);
     }
 
     public function removeNew(int $index): void
@@ -309,21 +379,13 @@ class Form extends Component
     }
 
     /** @return list<int> */
-    private function checkedInIds(): array
+    private function listedIds(): array
     {
-        if ($this->session === null) {
-            return [];
-        }
-
-        return array_values($this->session->sessionPlayers()
-            ->where('status', '!=', SessionPlayerStatus::Left->value)
-            ->pluck('player_id')
-            ->map(fn ($id): int => (int) $id)
-            ->all());
+        return $this->session === null ? [] : app(SessionListService::class)->listedIds($this->session);
     }
 
     /**
-     * Active club players matching the search, leaving out anyone checked in or picked.
+     * Active club players matching the search, leaving out anyone already listed or picked.
      *
      * @return Collection<int, Player>
      */
@@ -338,7 +400,7 @@ class Form extends Component
         return $this->club->players()
             ->where('active', true)
             ->where('name', 'like', '%'.addcslashes($term, '\%_').'%')
-            ->whereNotIn('id', array_merge($this->checkedInIds(), $this->pickedIds))
+            ->whereNotIn('id', array_merge($this->listedIds(), $this->pickedIds))
             ->orderBy('name')
             ->orderBy('id')
             ->limit(8)
@@ -359,21 +421,29 @@ class Form extends Component
     }
 
     /**
-     * @return Collection<int, SessionPlayer>
+     * The session's saved player list, read-only on the edit page.
+     *
+     * @return Collection<int, SessionListPlayer>
      */
     #[Computed]
-    public function checkedIn(): Collection
+    public function listed(): Collection
     {
         if ($this->session === null) {
             return new Collection;
         }
 
-        return $this->session->sessionPlayers()
-            ->where('status', '!=', SessionPlayerStatus::Left->value)
-            ->with('player')
-            ->orderBy('checked_in_at')
-            ->orderBy('id')
-            ->get();
+        return $this->session->listPlayers()->with('player')->orderBy('id')->get();
+    }
+
+    /**
+     * @return array{checked_in: int, listed: int, not_yet_here: int}
+     */
+    #[Computed]
+    public function counts(): array
+    {
+        return $this->session === null
+            ? ['checked_in' => 0, 'listed' => 0, 'not_yet_here' => 0]
+            : app(SessionListService::class)->counts($this->session);
     }
 
     public function cancelModeChange(): void

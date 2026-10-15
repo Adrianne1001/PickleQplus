@@ -7,8 +7,10 @@ use App\Models\PlaySession;
 use App\Models\User;
 use App\Services\CheckInQrService;
 use App\Services\PlaySessionService;
+use App\Services\SessionListService;
 use Flux\Flux;
 use Illuminate\Contracts\View\View;
+use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Locked;
 use Livewire\Attributes\On;
 use Livewire\Component;
@@ -20,6 +22,9 @@ class CheckInQr extends Component
 {
     #[Locked]
     public PlaySession $session;
+
+    /** The new check-in password being typed (the saved one is shown masked). */
+    public string $password = '';
 
     public function mount(PlaySession $session): void
     {
@@ -46,6 +51,31 @@ class CheckInQr extends Component
 
         Flux::modals()->close();
         Flux::toast(variant: 'success', text: __('New QR generated. The old one no longer works.'));
+    }
+
+    /** Set or change the session password (4 to 32 characters). Players already checked in aren't affected. */
+    public function savePassword(SessionListService $list): void
+    {
+        $this->authorize('manage', $this->session);
+
+        $this->resetErrorBag('password');
+        if (trim($this->password) === '') {
+            throw ValidationException::withMessages(['password' => __('Enter a password of 4 to 32 characters, or use Clear to remove it.')]);
+        }
+
+        $list->setPassword($this->session, $this->password);
+        $this->session->refresh();
+        $this->password = '';
+    }
+
+    public function clearPassword(SessionListService $list): void
+    {
+        $this->authorize('manage', $this->session);
+
+        $this->resetErrorBag('password');
+        $list->clearPassword($this->session);
+        $this->session->refresh();
+        $this->password = '';
     }
 
     public function resetTvLink(PlaySessionService $sessions): void

@@ -5,6 +5,7 @@ use App\Livewire\Sessions\CheckInPanel;
 use App\Livewire\Sessions\CheckInQr;
 use App\Livewire\Sessions\Courts;
 use App\Livewire\Sessions\Form;
+use App\Livewire\Sessions\ImportPlayers;
 use App\Livewire\Sessions\Results;
 use App\Livewire\Sessions\ResultsPage;
 use App\Livewire\Sessions\Show;
@@ -228,6 +229,7 @@ function boardComponents(): array
         'ResultsPage' => ['class' => ResultsPage::class, 'params' => ['club', 'session']],
         'CheckInPanel' => ['class' => CheckInPanel::class, 'params' => ['session']],
         'CheckInQr' => ['class' => CheckInQr::class, 'params' => ['session']],
+        'ImportPlayers' => ['class' => ImportPlayers::class, 'params' => ['club', 'session']],
         'Courts' => ['class' => Courts::class, 'params' => ['session']],
         'UpNext' => ['class' => UpNext::class, 'params' => ['session']],
         'WaitingList' => ['class' => WaitingList::class, 'params' => ['session']],
@@ -269,6 +271,7 @@ const LOCAL_STATE_ACTIONS = [
     'refreshBoard', 'refreshPanel', 'sessionChanged', 'syncFromSession', 'syncFromBroadcast',
     'cancelEdit', 'cancelVoid', 'showMore', 'cancelModeChange', 'closePanel', 'closeQuickAdd',
     'addGroup', 'removeGroup', 'resetGroups', 'unpick', 'removeNew',
+    'cancelSkill', 'dismissResults', 'back', 'resetImport',
 ];
 
 /** What a guest organizer must NOT be able to do even on their own club: "Class::method". */

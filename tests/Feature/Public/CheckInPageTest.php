@@ -7,6 +7,7 @@ use App\Models\Player;
 use App\Models\PlaySession;
 use App\Models\SessionPlayer;
 use App\Services\CheckInService;
+use App\Services\SessionListService;
 use Illuminate\Support\Facades\RateLimiter;
 use Livewire\Livewire;
 
@@ -28,14 +29,26 @@ test('a closed, ended or unknown token shows the friendly page', function () {
 
 test('a live token renders the page', function () {
     $session = checkinSession();
+    listPlayers($session, Player::factory()->for($session->club)->create());
 
     $this->get('/checkin/'.$session->checkin_token)->assertOk()->assertSee($session->name)->assertSee('Find your name');
+});
+
+test('a session with an empty list shows the ask-the-organizer state and no search or register', function () {
+    $session = checkinSession();
+
+    $this->get('/checkin/'.$session->checkin_token)->assertOk()
+        ->assertSeeHtml('data-test="checkin-no-list"')
+        ->assertSee('Ask the organizer to add you to the player list')
+        ->assertDontSeeHtml('data-test="checkin-search"')
+        ->assertDontSee("I'm new");
 });
 
 test('search is debounced, needs 2 chars, and shows the name as entered and checked-in state', function () {
     $session = checkinSession();
     $mia = Player::factory()->for($session->club)->create(['name' => 'Mia Fullname']);
     $in = Player::factory()->for($session->club)->create(['name' => 'Mick Already']);
+    listPlayers($session, $mia);
     SessionPlayer::factory()->create(['play_session_id' => $session->id, 'player_id' => $in->id]);
 
     Livewire::test(CheckIn::class, ['token' => $session->checkin_token])
@@ -51,6 +64,7 @@ test('search is debounced, needs 2 chars, and shows the name as entered and chec
 test('tapping a result confirms then checks in and remembers me', function () {
     $session = checkinSession();
     $player = Player::factory()->for($session->club)->create(['name' => 'Tess Tapper']);
+    listPlayers($session, $player);
 
     Livewire::test(CheckIn::class, ['token' => $session->checkin_token])
         ->set('search', 'Tess')
@@ -68,6 +82,7 @@ test('tapping a result confirms then checks in and remembers me', function () {
 test('checking in twice says already checked in', function () {
     $session = checkinSession();
     $player = Player::factory()->for($session->club)->create(['name' => 'Dora Twice']);
+    listPlayers($session, $player);
 
     foreach (range(1, 2) as $i) {
         $t = Livewire::test(CheckIn::class, ['token' => $session->checkin_token])
@@ -78,54 +93,75 @@ test('checking in twice says already checked in', function () {
     expect(SessionPlayer::query()->where('player_id', $player->id)->count())->toBe(1);
 });
 
-test('registering creates a player, checks them in and lists the star levels', function () {
+test('self-register is gone: no register actions, no new-player button', function () {
     $session = checkinSession();
 
+    $page = Livewire::test(CheckIn::class, ['token' => $session->checkin_token])
+        ->assertDontSeeHtml('data-test="im-new"')
+        ->assertDontSeeHtml('data-test="register-form"');
+
+    expect(method_exists($page->instance(), 'register'))->toBeFalse()
+        ->and(method_exists($page->instance(), 'startRegister'))->toBeFalse();
+});
+
+test('a player who is not on the list is not found and cannot be checked in', function () {
+    $session = checkinSession();
+    $listed = Player::factory()->for($session->club)->create(['name' => 'Lena Listed']);
+    $unlisted = Player::factory()->for($session->club)->create(['name' => 'Lena Unlisted']);
+    listPlayers($session, $listed);
+
     Livewire::test(CheckIn::class, ['token' => $session->checkin_token])
-        ->call('startRegister')
-        ->assertSee('New to pickleball')
-        ->assertSee('Tournament level')
-        ->set('regName', 'Rae Newbie')
-        ->set('regStars', '3')
-        ->call('register')
+        ->set('search', 'Lena')
+        ->assertSee('Lena Listed')
+        ->assertDontSee('Lena Unlisted')
+        ->call('select', $unlisted->public_id)
+        ->assertSet('selectedId', null)
+        ->assertHasErrors('player');
+
+    expect(SessionPlayer::query()->count())->toBe(0);
+});
+
+test('an empty list tells the visitor to ask the organizer', function () {
+    $session = checkinSession();
+    Player::factory()->for($session->club)->create(['name' => 'Nobody Listed']);
+
+    Livewire::test(CheckIn::class, ['token' => $session->checkin_token])
+        ->set('search', 'Nobody')
+        ->assertSee('Ask the organizer to add you to the player list');
+});
+
+test('the password field only shows when the session has one, and the password is passed to the service', function () {
+    $session = checkinSession();
+    $player = Player::factory()->for($session->club)->create(['name' => 'Pam Password']);
+    listPlayers($session, $player);
+
+    Livewire::test(CheckIn::class, ['token' => $session->checkin_token])
+        ->set('search', 'Pam')->call('select', $player->public_id)
+        ->assertDontSeeHtml('data-test="checkin-password"');
+
+    app(SessionListService::class)->setPassword($session, 'Kitchen7');
+
+    $page = Livewire::test(CheckIn::class, ['token' => $session->checkin_token])
+        ->set('search', 'Pam')->call('select', $player->public_id)
+        ->assertSeeHtml('data-test="checkin-password"')
+        ->call('confirm')
+        ->assertHasErrors('password')
+        ->set('password', 'nope')
+        ->call('confirm')
+        ->assertHasErrors('password')
+        ->assertSee("That password isn't right")
+        ->set('password', '  kitchen7 ')
+        ->call('confirm')
         ->assertHasNoErrors()
-        ->assertDispatched('me-selected')
         ->assertSee("You're checked in");
 
-    $player = Player::query()->where('name', 'Rae Newbie')->firstOrFail();
-    expect($player->stars)->toBe(3)->and($player->self_registered_at)->not->toBeNull();
-});
-
-test('register shows validation errors inline', function () {
-    $session = checkinSession();
-
-    Livewire::test(CheckIn::class, ['token' => $session->checkin_token])
-        ->call('startRegister')
-        ->set('regName', 'Sam')
-        ->set('regStars', '9')
-        ->call('register')
-        ->assertHasErrors('stars');
-});
-
-test('register rejects an existing name in a different case', function () {
-    $session = checkinSession();
-    Player::factory()->for($session->club)->create(['name' => 'Taken Tim']);
-
-    Livewire::test(CheckIn::class, ['token' => $session->checkin_token])
-        ->call('startRegister')
-        ->assertSee('your name or a nickname')
-        ->set('regName', 'tAKEN tIM')
-        ->set('regStars', '3')
-        ->call('register')
-        ->assertHasErrors('name')
-        ->assertSee('already on the roster');
-
-    expect(Player::query()->where('club_id', $session->club_id)->count())->toBe(1);
+    expect(SessionPlayer::query()->where('player_id', $player->id)->count())->toBe(1);
 });
 
 test('a regenerated token stops the form', function () {
     $session = checkinSession();
     $player = Player::factory()->for($session->club)->create(['name' => 'Late Larry']);
+    listPlayers($session, $player);
 
     $page = Livewire::test(CheckIn::class, ['token' => $session->checkin_token])
         ->set('search', 'Late')->call('select', $player->public_id);
@@ -139,6 +175,7 @@ test('a regenerated token stops the form', function () {
 test('the throttle error is shown for search and for submits', function () {
     $session = checkinSession();
     $player = Player::factory()->for($session->club)->create(['name' => 'Throt Tle']);
+    listPlayers($session, $player);
     $ip = request()->ip() ?? '127.0.0.1';
 
     foreach (range(1, 60) as $i) {
@@ -164,6 +201,7 @@ test('select ignores ids that are not in the results or in another club', functi
     $session = checkinSession();
     $mine = Player::factory()->for($session->club)->create(['name' => 'Mine Player']);
     $other = Player::factory()->for(Club::factory()->create())->create(['name' => 'Mine Foreign']);
+    listPlayers($session, $mine);
 
     Livewire::test(CheckIn::class, ['token' => $session->checkin_token])
         ->set('search', 'Mine')
@@ -185,6 +223,7 @@ test('token, results and selectedId are locked', function (string $property) {
 test('an error from the confirm step (already in another live session) is shown', function () {
     $session = checkinSession();
     $player = Player::factory()->for($session->club)->create(['name' => 'Busy Bee']);
+    listPlayers($session, $player);
     $other = PlaySession::factory()->for($session->club)->live()->create();
     app(CheckInService::class)->checkIn($other, $player);
 
@@ -195,4 +234,53 @@ test('an error from the confirm step (already in another live session) is shown'
         ->assertHasErrors('player')
         ->assertSeeHtml('data-test="checkin-error"')
         ->assertSeeHtml('data-test="checkin-confirm"');
+});
+
+test('a search with no match says to ask the organizer, and there is no self-register', function () {
+    $session = checkinSession();
+    $listed = Player::factory()->for($session->club)->create(['name' => 'Lena Listed']);
+    listPlayers($session, $listed);
+
+    Livewire::test(CheckIn::class, ['token' => $session->checkin_token])
+        ->set('search', 'Zzz')
+        ->assertSeeHtml('data-test="checkin-no-match"')
+        ->assertSee('Not on the list? Ask the organizer.')
+        ->assertDontSee("I'm new")
+        ->assertDontSeeHtml('data-test="register-form"');
+});
+
+test('the password step is part of the confirm form: wrong shows the message inline, right checks in', function () {
+    $session = checkinSession();
+    $player = Player::factory()->for($session->club)->create(['name' => 'Pam Password']);
+    listPlayers($session, $player);
+    app(SessionListService::class)->setPassword($session, 'Kitchen7');
+
+    Livewire::test(CheckIn::class, ['token' => $session->checkin_token])
+        ->set('search', 'Pam')
+        ->call('select', $player->public_id)
+        ->assertSeeHtml('wire:submit="confirm"')
+        ->assertSeeHtml('data-test="checkin-password"')
+        ->assertSee('Check in as Pam Password?')
+        ->set('password', 'wrong')
+        ->call('confirm')
+        ->assertSeeHtml('data-test="error-password"')
+        ->assertSee("That password isn't right")
+        ->assertSeeHtml('data-test="checkin-confirm"')
+        ->call('cancelSelect')
+        ->assertSet('password', '')
+        ->assertDontSeeHtml('data-test="error-password"');
+});
+
+test('without a password the confirm step has no password field and checks in', function () {
+    $session = checkinSession();
+    $player = Player::factory()->for($session->club)->create(['name' => 'Nina NoPass']);
+    listPlayers($session, $player);
+
+    Livewire::test(CheckIn::class, ['token' => $session->checkin_token])
+        ->set('search', 'Nina')
+        ->call('select', $player->public_id)
+        ->assertDontSeeHtml('data-test="checkin-password"')
+        ->call('confirm')
+        ->assertHasNoErrors()
+        ->assertSee("You're checked in");
 });

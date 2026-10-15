@@ -7,7 +7,6 @@ use App\Models\PlaySession;
 use App\Services\CheckInService;
 use App\Services\PlayerService;
 use App\Services\PublicSessionView;
-use App\Services\SelfCheckInService;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -57,21 +56,6 @@ test('staff update rejects a name taken by another player but allows keeping or 
 
     expect(fn () => app(PlayerService::class)->update($mine, ['name' => 'aCe']))->toThrow(ValidationException::class);
     expect(app(PlayerService::class)->update($mine, ['name' => 'BEA'])->name)->toBe('BEA');
-});
-
-test('self-register rejects an existing name in any case with the roster message', function () {
-    $club = Club::factory()->create();
-    Player::factory()->for($club)->create(['name' => 'Rocky']);
-    $session = PlaySession::factory()->live()->for($club)->create();
-
-    try {
-        app(SelfCheckInService::class)->register($session, (string) $session->checkin_token, 'rOCKY', null, 3, '9.9.9.1');
-        $this->fail('Expected a ValidationException.');
-    } catch (ValidationException $e) {
-        expect($e->errors()['name'][0])->toBe('You are already on the roster. Search for your name instead.');
-    }
-
-    expect($club->players()->count())->toBe(1);
 });
 
 test('the public read model shows names exactly as entered', function () {
@@ -159,16 +143,6 @@ test('the migration down() restores nickname and its unique index, and up() can 
         ->and(Schema::hasIndex('players', 'players_club_id_name_unique'))->toBeTrue();
 });
 
-test('self-register succeeds when the name exists only in another club', function () {
-    Player::factory()->for(Club::factory()->create())->create(['name' => 'Rocky']);
-    $session = PlaySession::factory()->live()->for(Club::factory()->create())->create();
-
-    $res = app(SelfCheckInService::class)->register($session, (string) $session->checkin_token, 'Rocky', null, 3, '9.9.9.2');
-
-    expect($res['public_name'])->toBe('Rocky')
-        ->and(Player::query()->where('club_id', $session->club_id)->where('name', 'Rocky')->exists())->toBeTrue();
-});
-
 /** Inserts a conflicting row right before the next player insert, i.e. after every pre-check passed. */
 function raceNextPlayerInsert(int $clubId, string $name): void
 {
@@ -184,18 +158,6 @@ function raceNextPlayerInsert(int $clubId, string $name): void
         ]);
     });
 }
-
-test('a unique violation that slips past the pre-check becomes a name error on self-register', function () {
-    $session = PlaySession::factory()->live()->for(Club::factory()->create())->create();
-    raceNextPlayerInsert($session->club_id, 'Racer');
-
-    try {
-        app(SelfCheckInService::class)->register($session, (string) $session->checkin_token, 'Racer', null, 3, '9.9.9.3');
-        $this->fail('Expected a ValidationException.');
-    } catch (ValidationException $e) {
-        expect($e->errors()['name'][0])->toBe('You are already on the roster. Search for your name instead.');
-    }
-});
 
 test('a unique violation that slips past the pre-check becomes a name error in PlayerService', function () {
     $club = Club::factory()->create();

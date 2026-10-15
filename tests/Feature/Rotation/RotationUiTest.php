@@ -172,42 +172,10 @@ test('the import preview shows a gender column', function () {
 
 // --- public check-in ---
 
-test('self-register stores the optional gender', function () {
-    $session = PlaySession::factory()->live()->for(Club::factory()->create())->create();
-
-    Livewire::test(CheckIn::class, ['token' => $session->checkin_token])
-        ->call('startRegister')
-        ->assertSeeHtml('data-test="register-gender"')
-        ->set('regName', 'New Nora')
-        ->set('regStars', '3')
-        ->set('regGender', 'woman')
-        ->call('register')
-        ->assertHasNoErrors()
-        ->assertSeeHtml('data-test="checkin-done"');
-
-    expect(Player::query()->where('name', 'New Nora')->firstOrFail()->gender)->toBe(Gender::Woman);
-});
-
-test('self-register works without a gender and rejects an invalid one', function () {
-    $session = PlaySession::factory()->live()->for(Club::factory()->create())->create();
-
-    Livewire::test(CheckIn::class, ['token' => $session->checkin_token])
-        ->call('startRegister')
-        ->set('regName', 'Bad Bob')
-        ->set('regStars', '3')
-        ->set('regGender', 'robot')
-        ->call('register')
-        ->assertHasErrors('gender')
-        ->set('regGender', '')
-        ->call('register')
-        ->assertHasNoErrors();
-
-    expect(Player::query()->where('name', 'Bad Bob')->firstOrFail()->gender)->toBeNull();
-});
-
 test('check-in offers gender only when the player has none and stores it', function () {
     $session = PlaySession::factory()->live()->for(Club::factory()->create())->create();
     $none = Player::factory()->for($session->club)->create(['name' => 'Gina Nogender', 'gender' => null]);
+    listPlayers($session, $none);
 
     Livewire::test(CheckIn::class, ['token' => $session->checkin_token])
         ->set('search', 'Gina')
@@ -224,6 +192,7 @@ test('check-in offers gender only when the player has none and stores it', funct
 test('check-in never offers or overwrites an existing gender', function () {
     $session = PlaySession::factory()->live()->for(Club::factory()->create())->create();
     $set = Player::factory()->for($session->club)->create(['name' => 'Manny Set', 'gender' => 'man']);
+    listPlayers($session, $set);
 
     Livewire::test(CheckIn::class, ['token' => $session->checkin_token])
         ->set('search', 'Manny')

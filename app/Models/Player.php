@@ -25,6 +25,7 @@ use Illuminate\Support\Carbon;
  * @property string|null $dupr_id
  * @property numeric-string|null $dupr_rating
  * @property int $stars
+ * @property bool $stars_pending
  * @property RatingSource $rating_source
  * @property bool $active
  * @property Carbon|null $created_at
@@ -44,6 +45,7 @@ class Player extends Model
         return [
             'dupr_rating' => 'decimal:3',
             'stars' => 'integer',
+            'stars_pending' => 'boolean',
             'rating_source' => RatingSource::class,
             'gender' => Gender::class,
             'active' => 'boolean',

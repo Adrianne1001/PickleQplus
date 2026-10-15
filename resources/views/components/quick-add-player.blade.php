@@ -23,8 +23,12 @@
         <flux:input wire:model="quick.name" :label="__('Name')" required maxlength="120" autocomplete="off" data-test="quick-name" />
 
         <flux:field data-test="quick-stars">
-            <flux:label>{{ __('Stars') }}</flux:label>
+            <flux:label>{{ __('Stars (optional)') }}</flux:label>
             <x-star-picker model="quick.stars" :label="__('Stars')" />
+            <flux:description>
+                {{ __('Leave blank to set the skill later. The player starts at 3 stars until you do.') }}
+                <button type="button" x-cloak x-show="$wire.quick.stars" x-on:click="$wire.quick.stars = ''" class="ms-1 font-semibold text-brand-700 underline underline-offset-2 dark:text-brand-400" data-test="quick-stars-clear">{{ __('Clear stars') }}</button>
+            </flux:description>
             <flux:error name="quick.stars" />
         </flux:field>
 
@@ -38,7 +42,7 @@
         </div>
 
         <div class="flex flex-wrap gap-3">
-            <flux:button type="button" variant="primary" class="min-h-11" wire:click="{{ $action }}" data-test="quick-save">{{ $submitLabel ?? __('Add and check in') }}</flux:button>
+            <flux:button type="button" variant="primary" class="min-h-11" wire:click="{{ $action }}" data-test="quick-save">{{ $submitLabel ?? __('Add to list') }}</flux:button>
             <flux:button type="button" variant="ghost" class="min-h-11" wire:click="closeQuickAdd" data-test="quick-cancel">{{ __('Cancel') }}</flux:button>
         </div>
     </div>

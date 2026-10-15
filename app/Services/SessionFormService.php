@@ -2,16 +2,18 @@
 
 namespace App\Services;
 
+use App\Enums\ListSource;
 use App\Enums\SessionStatus;
 use App\Models\Club;
-use App\Models\Player;
 use App\Models\PlaySession;
+use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 /**
- * The session form's save: create or update the session, create the quick-added
- * players and check in the picks, all in one transaction (all or nothing).
+ * The session form's save: create or update the session, create the quick-added players and put
+ * the picks on the session's player list (Phase 16), all in one transaction (all or nothing).
+ * Nobody is checked in here: staff check players in from the board.
  */
 class SessionFormService
 {
@@ -19,27 +21,43 @@ class SessionFormService
 
     public function __construct(
         private readonly PlaySessionService $sessions,
+        private readonly SessionListService $list,
         private readonly CheckInService $checkIns,
     ) {}
 
     /**
-     * @param  array<string, mixed>  $data  The session settings, as PlaySessionService::create/update take them.
-     * @param  list<int|string>  $playerIds  Existing club players to check in.
-     * @param  list<array{name?: mixed, stars?: mixed, dupr_id?: mixed, gender?: mixed}>  $newPlayers  Players to create, then check in.
+     * @param  array<string, mixed>  $data  The session settings, as PlaySessionService::create/update take them. An optional
+     *                                      `checkin_password` key sets, changes or (blank) clears the session password; absent keeps it.
+     * @param  list<int|string|array{id: int|string, source?: string}>  $playerIds  Existing club players to list.
+     * @param  list<array{name?: mixed, stars?: mixed, dupr_id?: mixed, gender?: mixed, dupr_rating?: mixed, source?: string}>  $newPlayers  Players to create, then list. Blank stars and no rating: 3 stars, skill not set.
      *
-     * Error keys: the session setting keys, `status` (ended session), `players` (a pick that is
-     * missing, from another club, inactive, or refused by check-in; names the player where known),
-     * `new_players.{i}.name|stars|dupr_id|gender` (i is the index in $newPlayers).
+     * Error keys: the session setting keys, `password`, `status` (ended session), `players` (a pick that is
+     * missing, from another club, inactive, or over the guest list cap), `new_players.{i}.name|stars|dupr_id|gender|dupr_rating`
+     * (i is the index in $newPlayers).
      *
      * @throws ValidationException
      */
-    public function save(Club $club, ?PlaySession $session, array $data, array $playerIds = [], array $newPlayers = []): PlaySession
+    public function save(Club $club, ?PlaySession $session, array $data, array $playerIds = [], array $newPlayers = [], ?User $actor = null): PlaySession
     {
-        $ids = array_values(array_unique(array_map('intval', $playerIds)));
+        $setPassword = array_key_exists('checkin_password', $data);
+        $password = $setPassword ? SessionListService::cleanPassword(is_string($data['checkin_password']) ? $data['checkin_password'] : null) : null;
+        unset($data['checkin_password']);
+
+        /** @var array<int, int|array{id: int, source: string}> $byId */
+        $byId = [];
+        foreach ($playerIds as $pick) {
+            if (is_array($pick)) {
+                $id = (int) $pick['id'];
+                $byId[$id] ??= ['id' => $id, 'source' => ListSource::fromInput($pick['source'] ?? null)->value];
+            } else {
+                $byId[(int) $pick] ??= (int) $pick;
+            }
+        }
+        $picks = array_values($byId);
 
         $this->guardDuplicateNames($newPlayers);
 
-        return DB::transaction(function () use ($club, $session, $data, $ids, $newPlayers): PlaySession {
+        return DB::transaction(function () use ($club, $session, $data, $picks, $newPlayers, $setPassword, $password, $actor): PlaySession {
             // Lock order club -> session -> players, as PlaySessionService::start().
             $this->guardClubNotExpired(Club::query()->whereKey($club->id)->lockForUpdate()->firstOrFail());
 
@@ -53,31 +71,21 @@ class SessionFormService
                 }
             }
 
-            // Locking reads before any plain read keep CheckInService's live-session clash check correct.
-            $picks = $this->resolvePicks($club, $ids);
-
             $session = $session === null
                 ? $this->sessions->create($club, $data)
                 : $this->sessions->update($session, $data);
 
-            foreach ($picks as $player) {
-                try {
-                    $this->checkIns->checkIn($session, $player, checkExpiry: false);
-                } catch (ValidationException $e) {
-                    $first = collect($e->errors())->flatten()->first();
-                    throw ValidationException::withMessages(['players' => "{$player->name}: {$first}"]);
-                }
+            if ($setPassword) {
+                $this->list->applyPassword($session, $password);
             }
 
+            $created = [];
             foreach ($newPlayers as $i => $row) {
                 $player = $this->checkIns->createQuickPlayer($club, $row, "new_players.{$i}.");
-                try {
-                    $this->checkIns->checkIn($session, $player, checkExpiry: false);
-                } catch (ValidationException $e) {
-                    $first = collect($e->errors())->flatten()->first();
-                    throw ValidationException::withMessages(['players' => "{$player->name}: {$first}"]);
-                }
+                $created[] = ['id' => $player->id, 'source' => ListSource::fromInput($row['source'] ?? null)->value];
             }
+
+            $this->list->addLocked($session, [...$picks, ...$created], $actor?->id);
 
             return $session;
         });
@@ -103,41 +111,5 @@ class SessionFormService
             }
             $seen[$name] = true;
         }
-    }
-
-    /**
-     * @param  list<int>  $ids
-     * @return list<Player>
-     *
-     * @throws ValidationException
-     */
-    private function resolvePicks(Club $club, array $ids): array
-    {
-        if ($ids === []) {
-            return [];
-        }
-
-        $found = Player::query()
-            ->where('club_id', $club->id)
-            ->whereIn('id', $ids)
-            ->orderBy('id')
-            ->lockForUpdate()
-            ->get()
-            ->keyBy('id');
-
-        $picks = [];
-        foreach ($ids as $id) {
-            $player = $found->get($id);
-            if ($player === null || $player->club_id !== $club->id) {
-                // A foreign club's player is indistinguishable from a missing one, and is never named.
-                throw ValidationException::withMessages(['players' => 'One of the selected players could not be found in this club.']);
-            }
-            if (! $player->active) {
-                throw ValidationException::withMessages(['players' => "{$player->name} is deactivated and cannot be checked in."]);
-            }
-            $picks[] = $player;
-        }
-
-        return $picks;
     }
 }

@@ -29,6 +29,7 @@ use Illuminate\Support\Str;
  * @property RotationMode $rotation_mode
  * @property array{winners_stay_max_wins: int, skill_groups: list<array<string, int>>} $mode_settings
  * @property string|null $checkin_token
+ * @property string|null $checkin_password
  * @property int $up_next_count
  * @property bool $auto_fill
  * @property Carbon|null $started_at
@@ -44,6 +45,9 @@ class PlaySession extends Model
 
     /** @var array<string, mixed> */
     protected $attributes = ['rotation_mode' => 'balanced'];
+
+    /** @var list<string> */
+    protected $hidden = ['checkin_password'];
 
     protected static function booted(): void
     {
@@ -146,6 +150,7 @@ class PlaySession extends Model
             'rotation_mode' => RotationMode::class,
             'up_next_count' => 'integer',
             'auto_fill' => 'boolean',
+            'checkin_password' => 'encrypted',
             'started_at' => 'datetime',
             'ended_at' => 'datetime',
         ];
@@ -216,6 +221,35 @@ class PlaySession extends Model
     public function sessionPlayers(): HasMany
     {
         return $this->hasMany(SessionPlayer::class);
+    }
+
+    /**
+     * The session's player list (Phase 16).
+     *
+     * @return HasMany<SessionListPlayer, $this>
+     */
+    public function listPlayers(): HasMany
+    {
+        return $this->hasMany(SessionListPlayer::class);
+    }
+
+    /**
+     * Does a typed password open this session's check-in? True when none is set. Trimmed and
+     * case-insensitive (phone keyboards auto-capitalise), compared with hash_equals.
+     */
+    public function checkinPasswordMatches(?string $given): bool
+    {
+        $stored = $this->checkin_password;
+        if ($stored === null || $stored === '') {
+            return true;
+        }
+
+        return hash_equals(self::normalisePassword($stored), self::normalisePassword((string) $given));
+    }
+
+    public static function normalisePassword(string $password): string
+    {
+        return mb_strtolower(trim($password));
     }
 
     /**

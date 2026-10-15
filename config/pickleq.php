@@ -94,6 +94,7 @@ return [
         'max_courts' => (int) env('PICKLEQ_GUEST_MAX_COURTS', 6),
         'max_checked_in' => (int) env('PICKLEQ_GUEST_MAX_CHECKED_IN', 40),
         'max_roster' => (int) env('PICKLEQ_GUEST_MAX_ROSTER', 60),
+        'max_listed' => (int) env('PICKLEQ_GUEST_MAX_LISTED', 60),
         'max_sessions' => 1,
         'idle_hours' => (int) env('PICKLEQ_GUEST_IDLE_HOURS', 24),
         'max_hours' => (int) env('PICKLEQ_GUEST_MAX_HOURS', 72),

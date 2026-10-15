@@ -7,12 +7,15 @@ use App\Livewire\Sessions\Concerns\QuickAddsPlayer;
 use App\Models\Club;
 use App\Models\Player;
 use App\Models\PlaySession;
+use App\Models\SessionListPlayer;
 use App\Models\SessionPlayer;
 use App\Models\User;
 use App\Services\CheckInService;
 use App\Services\SessionBoard;
+use App\Services\SessionListService;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Locked;
@@ -20,8 +23,9 @@ use Livewire\Attributes\On;
 use Livewire\Component;
 
 /**
- * Staff check-in: search the club's active players, check them in, and manage
- * the checked-in list (check out, break, return).
+ * Staff check-in (Phase 16): build the session's player list (search, quick-add, import),
+ * check listed players in from "Not Yet Here" (one by one or all), and manage the
+ * checked-in list (check out, break, return).
  */
 class CheckInPanel extends Component
 {
@@ -31,6 +35,29 @@ class CheckInPanel extends Component
     public PlaySession $session;
 
     public string $search = '';
+
+    /** Player whose "Set skill" star picker is open (Not Yet Here or the checked-in list). */
+    #[Locked]
+    public ?int $skillFor = null;
+
+    /** The star picker's value for $skillFor. */
+    public string $skillStars = '';
+
+    /**
+     * What the last import did, shown until dismissed.
+     *
+     * @var array{listed: int, created: int, already_listed: int, errors: int, notes: list<string>}|null
+     */
+    #[Locked]
+    public ?array $importResult = null;
+
+    /**
+     * What the last "Check in all" did, shown until dismissed.
+     *
+     * @var array{checked_in: int, skipped: list<array{name: string, reason: string}>}|null
+     */
+    #[Locked]
+    public ?array $checkInAllResult = null;
 
     public function mount(PlaySession $session): void
     {
@@ -46,22 +73,134 @@ class CheckInPanel extends Component
         $this->session->refresh();
     }
 
-    public function checkIn(CheckInService $checkIns, int $playerId): void
+    /** Check in a player who is on the session's list (Not Yet Here). */
+    public function checkIn(SessionListService $list, int $playerId): void
     {
         $this->authorize('manage', $this->session);
 
-        $checkIns->checkIn($this->session, $this->player($playerId));
+        $list->checkIn($this->session, $playerId);
+        $this->closeSkillFor($playerId);
+    }
+
+    /**
+     * Check in every Not Yet Here player. Players the check-in rules refuse are skipped and named.
+     */
+    public function checkInAll(SessionListService $list): void
+    {
+        $this->authorize('manage', $this->session);
+
+        $this->checkInAllResult = $list->checkInAll($this->session);
+    }
+
+    /** Take a player off the list. Only players who aren't checked in can be removed. */
+    public function removeFromList(SessionListService $list, int $playerId): void
+    {
+        $this->authorize('manage', $this->session);
+
+        $list->remove($this->session, $playerId);
+        $this->closeSkillFor($playerId);
+    }
+
+    public function openSkill(int $playerId): void
+    {
+        $this->authorize('manage', $this->session);
+
+        $this->resetErrorBag(['stars']);
+        $this->skillFor = $playerId;
+        $this->skillStars = '';
+    }
+
+    public function cancelSkill(): void
+    {
+        $this->skillFor = null;
+        $this->skillStars = '';
+        $this->resetErrorBag(['stars']);
+    }
+
+    /** Save the picked stars for the player whose picker is open; this clears "Set skill". */
+    public function saveSkill(SessionListService $list): void
+    {
+        $this->authorize('manage', $this->session);
+
+        if ($this->skillFor === null) {
+            return;
+        }
+
+        $list->setSkill($this->session, $this->skillFor, $this->skillStars);
+        $this->cancelSkill();
+    }
+
+    /** Hide the import and check-in-all results. */
+    public function dismissResults(): void
+    {
+        $this->importResult = null;
+        $this->checkInAllResult = null;
+    }
+
+    /**
+     * The import modal added players to the list.
+     *
+     * The event only carries a token; the result itself is read (once) from the server's cache, where
+     * the import component put it, so nothing the browser sends is shown as a result.
+     */
+    #[On('players-imported')]
+    public function importFinished(string $token): void
+    {
+        $this->authorize('manage', $this->session);
+
+        $result = Cache::pull(ImportPlayers::resultKey($this->session, $token));
+        if (! is_array($result)) {
+            return;
+        }
+
+        $notes = [];
+        $given = $result['notes'] ?? [];
+        foreach (is_array($given) ? $given : [] as $note) {
+            if (is_string($note)) {
+                $notes[] = mb_substr($note, 0, 300);
+            }
+        }
+
+        $count = fn (string $key): int => is_numeric($result[$key] ?? null) ? max(0, (int) $result[$key]) : 0;
+
+        $this->importResult = [
+            'listed' => $count('listed'),
+            'created' => $count('created'),
+            'already_listed' => $count('already_listed'),
+            'errors' => $count('errors'),
+            'notes' => array_slice($notes, 0, 20),
+        ];
+        $this->checkInAllResult = null;
+    }
+
+    private function closeSkillFor(int $playerId): void
+    {
+        if ($this->skillFor === $playerId) {
+            $this->cancelSkill();
+        }
+    }
+
+    /** Search result tap: put the player on the session's list. Nobody is checked in by this. */
+    public function addToList(SessionListService $list, int $playerId): void
+    {
+        $this->authorize('manage', $this->session);
+
+        $user = auth()->user();
+        $list->add($this->session, [$this->player($playerId)->id], $user instanceof User ? $user : null);
         $this->search = '';
     }
 
-    /** Create the player from the inline form and check them in, in one transaction. */
-    public function saveQuick(CheckInService $checkIns): void
+    /** Create the player from the inline form and put them on the list, in one transaction. */
+    public function saveQuick(SessionListService $list): void
     {
         $this->authorize('manage', $this->session);
         $this->authorize('create', [Player::class, $this->quickClub()]);
 
+        $user = auth()->user();
+
         try {
-            $checkIns->addNewPlayer($this->session, $this->quickInput());
+            // Stars are optional: blank lists the player at 3 stars with "Set skill" pending.
+            $list->addNewPlayer($this->session, $this->quickInput(), $user instanceof User ? $user : null);
         } catch (ValidationException $e) {
             throw $this->prefixed($e);
         }
@@ -107,7 +246,7 @@ class CheckInPanel extends Component
     }
 
     /**
-     * Active club players matching the search who aren't already checked in.
+     * Active club players matching the search who aren't already on the session's list.
      *
      * @return Collection<int, Player>
      */
@@ -120,18 +259,27 @@ class CheckInPanel extends Component
             return new Collection;
         }
 
-        $like = '%'.addcslashes($term, '\\%_').'%';
+        return app(SessionListService::class)->search($this->session, $term);
+    }
 
-        return $this->session->club()->firstOrFail()->players()
-            ->where('active', true)
-            ->where('name', 'like', $like)
-            ->whereNotIn('id', $this->session->sessionPlayers()
-                ->where('status', '!=', SessionPlayerStatus::Left->value)
-                ->select('player_id'))
-            ->orderBy('name')
-            ->orderBy('id')
-            ->limit(8)
-            ->get();
+    /**
+     * Listed players who haven't been checked in.
+     *
+     * @return Collection<int, SessionListPlayer>
+     */
+    #[Computed]
+    public function notYetHere(): Collection
+    {
+        return app(SessionListService::class)->notYetHere($this->session);
+    }
+
+    /**
+     * @return array{checked_in: int, listed: int, not_yet_here: int}
+     */
+    #[Computed]
+    public function counts(): array
+    {
+        return app(SessionListService::class)->counts($this->session);
     }
 
     /**

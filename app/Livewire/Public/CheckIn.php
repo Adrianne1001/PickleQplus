@@ -44,15 +44,8 @@ class CheckIn extends Component
     #[Locked]
     public bool $needsGender = false;
 
-    public bool $registering = false;
-
-    public string $regName = '';
-
-    public string $regDuprId = '';
-
-    public string $regStars = '';
-
-    public string $regGender = '';
+    /** The session password, when the session has one. */
+    public string $password = '';
 
     /** @var array{result: string, player_id: string, public_name: string}|null */
     #[Locked]
@@ -101,6 +94,7 @@ class CheckIn extends Component
     public function cancelSelect(): void
     {
         $this->selectedId = null;
+        $this->password = '';
         $this->gender = '';
         $this->needsGender = false;
         $this->resetErrorBag();
@@ -116,51 +110,13 @@ class CheckIn extends Component
         }
 
         try {
-            $this->finish($checkIns->checkIn($session, $this->token, $this->selectedId, (string) request()->ip(), $this->needsGender && $this->gender !== '' ? $this->gender : null), $session);
+            $this->finish($checkIns->checkIn($session, $this->token, $this->selectedId, (string) request()->ip(), $this->needsGender && $this->gender !== '' ? $this->gender : null, $this->password === '' ? null : $this->password), $session);
         } catch (ValidationException $e) {
             $this->setErrorBag($e->validator->errors());
         }
     }
 
-    public function startRegister(): void
-    {
-        $this->resetErrorBag();
-        $this->registering = true;
-        $this->selectedId = null;
-        $this->regName = $this->regName !== '' ? $this->regName : trim($this->search);
-    }
-
-    public function cancelRegister(): void
-    {
-        $this->registering = false;
-        $this->resetErrorBag();
-    }
-
-    public function register(SelfCheckInService $checkIns): void
-    {
-        $session = $this->session();
-        if ($session === null) {
-            $this->addError('session', __('Check-in is closed for this session.'));
-
-            return;
-        }
-
-        try {
-            $this->finish($checkIns->register(
-                $session,
-                $this->token,
-                $this->regName,
-                $this->regDuprId === '' ? null : $this->regDuprId,
-                $this->regStars,
-                (string) request()->ip(),
-                $this->regGender === '' ? null : $this->regGender,
-            ), $session);
-        } catch (ValidationException $e) {
-            $this->setErrorBag($e->validator->errors());
-        }
-    }
-
-    public function render(): View
+    public function render(SelfCheckInService $checkIns): View
     {
         $session = $this->session();
         $selected = collect($this->results)->firstWhere('id', $this->selectedId);
@@ -168,20 +124,11 @@ class CheckIn extends Component
         return view('livewire.public.check-in', [
             'session' => $session,
             'selected' => $selected,
-            'levels' => self::LEVELS,
+            'requiresPassword' => $session !== null && $checkIns->requiresPassword($session),
+            'listEmpty' => $session !== null && ! $checkIns->hasList($session),
             'queueUrl' => $session === null ? null : url('/c/'.($session->club ?? abort(404))->slug.'/s/'.$session->public_id),
         ]);
     }
-
-    /** Plain-language descriptions for the self-rated stars. */
-    public const LEVELS = [
-        1 => 'New to pickleball',
-        2 => 'Learning the rules and basic strokes',
-        3 => 'Consistent rallies, learning dinks',
-        4 => 'Solid all-round, third-shot drops',
-        5 => 'Advanced, strategic play',
-        6 => 'Tournament level',
-    ];
 
     /**
      * @param  array{result: string, player_id: string, public_name: string}  $result
@@ -190,7 +137,7 @@ class CheckIn extends Component
     {
         $this->done = $result;
         $this->selectedId = null;
-        $this->registering = false;
+        $this->password = '';
         $this->results = [];
         $this->resetErrorBag();
 

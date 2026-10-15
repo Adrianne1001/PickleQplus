@@ -304,7 +304,7 @@ test('a livewire call with the wrong organizer cookie is 404, never 410', functi
     $this->withCookie(guestCookie($club), $token);
     $snapshot = guestSnapshot($this->get(route('clubs.sessions.show', [$club, $session]))->getContent());
 
-    $this->withCookie(guestCookie($club), 'x'.substr($token, 1));
+    $this->withCookie(guestCookie($club), ($token[0] === 'x' ? 'y' : 'x').substr($token, 1));
     guestAction($this, $snapshot, 'syncFromBroadcast')->assertNotFound();
 });
 

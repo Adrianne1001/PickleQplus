@@ -420,9 +420,12 @@ class RosterImportService
     }
 
     /**
+     * Error messages for one row's name, DUPR ID and rating (P1 formats). Shared with the
+     * session player list import (Phase 16).
+     *
      * @return list<string>
      */
-    private function validateRow(string $name, ?string $duprId, ?string $rating): array
+    public function validateRow(string $name, ?string $duprId, ?string $rating): array
     {
         $min = (float) config('pickleq.rating_min');
         $max = (float) config('pickleq.rating_max');

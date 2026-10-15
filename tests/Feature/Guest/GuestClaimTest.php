@@ -32,7 +32,7 @@ test('the claim page needs the organizer cookie of that club', function () {
     $user = User::factory()->create();
 
     $this->actingAs($user)->get(route('guest.claim', $club))->assertNotFound();
-    $this->actingAs($user)->withCookie(guestCookie($club), 'x'.substr($token, 1))->get(route('guest.claim', $club))->assertNotFound();
+    $this->actingAs($user)->withCookie(guestCookie($club), ($token[0] === 'x' ? 'y' : 'x').substr($token, 1))->get(route('guest.claim', $club))->assertNotFound();
     $this->actingAs($user)->withCookie(guestCookie($other), $otherToken)->get(route('guest.claim', $club))->assertNotFound();
     $this->actingAs($user)->withCookie(guestCookie($normal), $token)->get(route('guest.claim', $normal))->assertNotFound();
 });

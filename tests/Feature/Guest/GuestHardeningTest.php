@@ -11,6 +11,7 @@ use App\Services\ClubService;
 use App\Services\GuestClubService;
 use App\Services\PlaySessionService;
 use App\Services\SelfCheckInService;
+use App\Services\SessionListService;
 use App\Support\GuestOwnerContext;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Exceptions;
@@ -137,10 +138,17 @@ test('every write path refuses an expired guest club', function () {
     $sessions = app(PlaySessionService::class);
     $checkIns = app(CheckInService::class);
     $self = app(SelfCheckInService::class);
+    $list = app(SessionListService::class);
 
     $writes = [
         'check in' => fn () => $checkIns->checkIn($session, $player),
-        'quick add' => fn () => $checkIns->addNewPlayer($session, ['name' => 'New One', 'stars' => 3]),
+        'quick add' => fn () => $list->addNewPlayer($session, ['name' => 'New One', 'stars' => 3]),
+        'list add' => fn () => $list->add($session, [$player->id]),
+        'list remove' => fn () => $list->remove($session, $player->id),
+        'list check in' => fn () => $list->checkIn($session, $player->id),
+        'list check in all' => fn () => $list->checkInAll($session),
+        'list set skill' => fn () => $list->setSkill($session, $player->id, 4),
+        'list password' => fn () => $list->setPassword($session, 'secret'),
         'check out' => fn () => $checkIns->checkOut($session, $player),
         'break' => fn () => $checkIns->goOnBreak($session, $player),
         'return' => fn () => $checkIns->returnFromBreak($session, $player),
@@ -150,14 +158,13 @@ test('every write path refuses an expired guest club', function () {
         'qr' => fn () => $sessions->regenerateCheckinToken($session, null),
         'tv' => fn () => $sessions->resetTvLink($session, null),
         'self check in' => fn () => $self->checkIn($session, (string) $session->checkin_token, (string) $player->public_id, '7.7.7.7'),
-        'self register' => fn () => $self->register($session, (string) $session->checkin_token, 'Walk In', null, 3, '7.7.7.7'),
         'second session' => fn () => $sessions->create($club),
     ];
 
     foreach ($writes as $label => $write) {
         expect($write)->toThrow(ValidationException::class, 'expired');
     }
-    expect($club->players()->where('name', 'like', '%New One%')->orWhere('name', 'Walk In')->exists())->toBeFalse();
+    expect($club->players()->where('name', 'like', '%New One%')->exists())->toBeFalse();
 });
 
 test('an unexpired guest club and a normal club still accept the same writes', function () {

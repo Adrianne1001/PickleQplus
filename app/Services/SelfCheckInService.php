@@ -3,19 +3,14 @@
 namespace App\Services;
 
 use App\Enums\Gender;
-use App\Enums\RatingSource;
 use App\Enums\SessionPlayerStatus;
 use App\Enums\SessionStatus;
-use App\Models\Club;
 use App\Models\Player;
 use App\Models\PlaySession;
+use App\Models\SessionListPlayer;
 use App\Models\SessionPlayer;
-use App\Rules\DuprPlayerId;
-use Illuminate\Database\UniqueConstraintViolationException;
-use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\RateLimiter;
-use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
 
 /**
@@ -25,6 +20,10 @@ use Illuminate\Validation\ValidationException;
  * token against the session (inside the session lock when it writes), so a
  * page opened with a replaced QR stops working. Players are identified
  * publicly by players.public_id, never by their sequential id.
+ *
+ * Phase 16: search and check-in cover only the players on the session's list, and an optional
+ * session password is checked (inside the lock, with the token) before any player is looked up.
+ * Error keys: `session` (closed or stale token), `password`, `player`, `gender`, `throttle`.
  *
  * @phpstan-type SearchRow array{id: string, name: string, needs_gender: bool, status: 'waiting'|'playing'|'break'|null}
  * @phpstan-type CheckInResult array{result: string, player_id: string, public_name: string}
@@ -41,16 +40,28 @@ class SelfCheckInService
 
     public const SUBMITS_PER_MINUTE = 10;
 
-    public const REGISTRATIONS_PER_HOUR = 5;
-
-    public const REGISTRATIONS_PER_SESSION = 100;
-
     private const STALE = 'This QR code has been replaced. Scan the new one.';
 
     public function __construct(private readonly CheckInService $checkIns) {}
 
     /**
-     * Active club players matching name. Fewer than 2 characters
+     * Does the session ask for a password? (A read of the given instance, for the page to decide.)
+     */
+    public function requiresPassword(PlaySession $session): bool
+    {
+        return $session->checkin_password !== null && $session->checkin_password !== '';
+    }
+
+    /**
+     * Has the organizer put anyone on the session's list? False shows "Ask the organizer to add you".
+     */
+    public function hasList(PlaySession $session): bool
+    {
+        return SessionListPlayer::query()->where('play_session_id', $session->id)->exists();
+    }
+
+    /**
+     * Active listed players matching name. Fewer than 2 characters
      * returns nothing. `status` is the player's state in this session, null
      * when not checked in (or left), meaning they can check in.
      *
@@ -78,6 +89,7 @@ class SelfCheckInService
         $players = Player::query()
             ->where('club_id', $session->club_id)
             ->where('active', true)
+            ->whereIn('id', SessionListPlayer::query()->select('player_id')->where('play_session_id', $session->id))
             ->whereRaw("lower(name) like ? escape '!'", [$like])
             ->orderBy('name')
             ->orderBy('id')
@@ -113,25 +125,33 @@ class SelfCheckInService
     }
 
     /**
-     * Check an existing club player in (or return them from break). A gender
+     * Check a listed club player in (or return them from break). The password, when the session
+     * has one, is compared inside the session lock (trimmed, case-insensitive); a wrong or missing
+     * one is a `password` error and, like every submit, counts toward the submit limit. A gender
      * is stored only when the player has none (never overwritten). Already being checked in is a
-     * result, not an error. result: checked_in, returned_from_break or
-     * already_checked_in.
+     * result, not an error. result: checked_in, returned_from_break or already_checked_in.
      *
      * @return CheckInResult
      *
      * @throws ValidationException
      */
-    public function checkIn(PlaySession $session, string $token, string $playerPublicId, string $ip, ?string $gender = null): array
+    public function checkIn(PlaySession $session, string $token, string $playerPublicId, string $ip, ?string $gender = null, ?string $password = null): array
     {
         $this->throttle("selfcheckin:submit:{$ip}:{$session->id}", self::SUBMITS_PER_MINUTE, 60, 'Too many attempts. Please wait a minute and try again.');
 
         $gender = $this->parseGender($gender);
         $this->guardGuestActive($session);
 
-        return DB::transaction(function () use ($session, $token, $playerPublicId, $gender): array {
+        return DB::transaction(function () use ($session, $token, $playerPublicId, $gender, $password): array {
             $this->lockSession($session);
             $this->assertUsable($session, $token);
+
+            // Before any player lookup, so the list can't be probed without the password.
+            if (! $session->checkinPasswordMatches($password)) {
+                throw ValidationException::withMessages([
+                    'password' => trim((string) $password) === '' ? 'Enter the session password.' : "That password isn't right.",
+                ]);
+            }
 
             // Locking reads only until CheckInService::checkIn has run (see the race-safety
             // note there): no plain read may create the REPEATABLE READ snapshot first.
@@ -142,7 +162,13 @@ class SelfCheckInService
                 ->lockForUpdate()
                 ->first();
 
-            if ($player === null) {
+            $listed = $player === null ? null : SessionListPlayer::query()
+                ->where('play_session_id', $session->id)
+                ->where('player_id', $player->id)
+                ->lockForUpdate()
+                ->first(['id']);
+
+            if ($player === null || $listed === null) {
                 throw ValidationException::withMessages(['player' => 'Could not find that player. Search for your name again.']);
             }
 
@@ -179,96 +205,6 @@ class SelfCheckInService
                 'public_name' => $player->name,
             ];
         });
-    }
-
-    /**
-     * Create a manual, self-registered player and check them in.
-     *
-     * @return CheckInResult result is registered
-     *
-     * @throws ValidationException
-     */
-    public function register(PlaySession $session, string $token, string $name, ?string $duprId, int|string $stars, string $ip, ?string $gender = null): array
-    {
-        $this->throttle("selfcheckin:submit:{$ip}:{$session->id}", self::SUBMITS_PER_MINUTE, 60, 'Too many attempts. Please wait a minute and try again.');
-
-        $registerKey = "selfcheckin:register:{$ip}";
-        if (RateLimiter::tooManyAttempts($registerKey, self::REGISTRATIONS_PER_HOUR)) {
-            throw ValidationException::withMessages(['throttle' => 'Too many new registrations from this device. Please ask the organizer for help.']);
-        }
-
-        $gender = $this->parseGender($gender);
-
-        $data = Validator::make([
-            'name' => trim($name),
-            'dupr_id' => DuprPlayerId::normalize($duprId),
-            'stars' => $stars,
-        ], [
-            'name' => ['required', 'string', 'max:120'],
-            'dupr_id' => ['nullable', 'string', new DuprPlayerId],
-            'stars' => ['required', 'integer', 'between:1,6'],
-        ])->validate();
-
-        $onRoster = 'You are already on the roster. Search for your name instead.';
-
-        try {
-            $result = DB::transaction(function () use ($session, $token, $data, $gender, $onRoster): array {
-                // Same lock order as PlaySessionService::start(): club, session, then players.
-                $club = Club::query()->whereKey($session->club_id)->lockForUpdate()->firstOrFail();
-                $this->guardClubNotExpired($club);
-                $this->lockSession($session);
-                $this->assertUsable($session, $token);
-
-                if ($club->is_guest) {
-                    $max = (int) config('pickleq.guest.max_roster');
-                    if (Player::query()->where('club_id', $club->id)->count() >= $max) {
-                        throw ValidationException::withMessages(['register' => 'This guest session is full. Ask the organizer to add you.']);
-                    }
-                }
-
-                // A brand-new player cannot be in another live session, so the race that
-                // CheckInService guards against does not apply. The club lock serialises
-                // registrations; the unique indexes and the catch below cover the rest.
-                $registered = SessionPlayer::query()
-                    ->where('play_session_id', $session->id)
-                    ->selfRegisteredHere()
-                    ->count();
-                if ($registered >= self::REGISTRATIONS_PER_SESSION) {
-                    throw ValidationException::withMessages(['register' => 'Self-registration is full for this session. Ask the organizer to add you.']);
-                }
-
-                if (Player::nameTaken($session->club_id, (string) $data['name'])) {
-                    throw ValidationException::withMessages(['name' => $onRoster]);
-                }
-                if ($data['dupr_id'] !== null
-                    && Player::query()->where('club_id', $session->club_id)->where('dupr_id', $data['dupr_id'])->exists()) {
-                    throw ValidationException::withMessages(['dupr_id' => $onRoster]);
-                }
-
-                $player = new Player(['active' => true]);
-                $player->club_id = $session->club_id;
-                $player->forceFill([
-                    'name' => $data['name'],
-                    'gender' => $gender,
-                    'dupr_id' => $data['dupr_id'],
-                    'dupr_rating' => null,
-                    'rating_source' => RatingSource::Manual,
-                    'stars' => (int) $data['stars'],
-                    'self_registered_at' => Carbon::now(),
-                    'self_registered_session_id' => $session->id,
-                ])->save();
-
-                $this->checkIns->checkIn($session, $player, checkExpiry: false);
-
-                return ['result' => 'registered', 'player_id' => (string) $player->public_id, 'public_name' => $player->name];
-            });
-        } catch (UniqueConstraintViolationException) {
-            throw ValidationException::withMessages(['name' => $onRoster]);
-        }
-
-        RateLimiter::hit($registerKey, 3600);
-
-        return $result;
     }
 
     /**

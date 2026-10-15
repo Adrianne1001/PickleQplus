@@ -240,7 +240,7 @@ test('deleting a live session shows the service error', function () {
 
 // --- check-in panel ---
 
-test('the search lists only active, not-yet-checked-in club players', function () {
+test('the search lists only active club players who are not on the list yet', function () {
     [$owner, , $club] = sessionClubs();
     $session = PlaySession::factory()->for($club)->create();
     Player::factory()->for($club)->create(['name' => 'Alice Active']);
@@ -263,9 +263,13 @@ test('check in, break, return and check out update the list', function () {
     $player = Player::factory()->for($club)->create(['name' => 'Pat Player']);
 
     $panel = Livewire::actingAs($staff)->test(CheckInPanel::class, ['session' => $session])
-        ->call('checkIn', $player->id)
+        ->call('addToList', $player->id)
         ->assertHasNoErrors()
-        ->assertSet('search', '')
+        ->assertSet('search', '');
+    expect(SessionPlayer::where('player_id', $player->id)->exists())->toBeFalse();
+
+    $panel->call('checkIn', $player->id)
+        ->assertHasNoErrors()
         ->assertSee('Pat Player');
     expect(SessionPlayer::where('player_id', $player->id)->value('status'))->toBe(SessionPlayerStatus::Waiting);
 

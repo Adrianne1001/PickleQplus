@@ -1,11 +1,11 @@
 <?php
 
-use App\Enums\SessionPlayerStatus;
 use App\Livewire\Sessions\CheckInPanel;
 use App\Livewire\Sessions\Form;
 use App\Models\Club;
 use App\Models\Player;
 use App\Models\PlaySession;
+use App\Models\SessionListPlayer;
 use App\Models\SessionPlayer;
 use App\Models\User;
 use App\Services\CheckInService;
@@ -34,7 +34,7 @@ test('the panel offers quick-add only for unknown names', function () {
         ->assertDontSeeHtml('data-test="quick-add-row"');
 });
 
-test('quick-add on the panel works for a draft and a live session', function () {
+test('quick-add on the panel lists the new player and checks nobody in, for a draft and a live session', function () {
     [$owner, $club] = quickClub();
     foreach ([PlaySession::factory()->for($club)->create(), PlaySession::factory()->for($club)->live()->create()] as $i => $session) {
         Livewire::actingAs($owner)->test(CheckInPanel::class, ['session' => $session])
@@ -45,8 +45,47 @@ test('quick-add on the panel works for a draft and a live session', function () 
             ->assertHasNoErrors();
 
         $player = Player::where('club_id', $club->id)->where('name', "Newbie {$i}")->firstOrFail();
-        expect(SessionPlayer::where('play_session_id', $session->id)->where('player_id', $player->id)->exists())->toBeTrue();
+        expect(SessionListPlayer::where('play_session_id', $session->id)->where('player_id', $player->id)->exists())->toBeTrue()
+            ->and(SessionPlayer::where('play_session_id', $session->id)->where('player_id', $player->id)->exists())->toBeFalse();
     }
+});
+
+test('a search result tap lists the player, and Check In from the list checks them in', function () {
+    [$owner, $club] = quickClub();
+    $session = PlaySession::factory()->for($club)->live()->create();
+    $ana = Player::factory()->for($club)->create(['name' => 'Ana Lopez']);
+
+    $panel = Livewire::actingAs($owner)->test(CheckInPanel::class, ['session' => $session])
+        ->set('search', 'Ana')
+        ->assertSeeHtml('data-test="add-to-list-button"')
+        ->call('addToList', $ana->id)
+        ->assertHasNoErrors()
+        ->assertSet('search', '');
+
+    expect(SessionListPlayer::where('play_session_id', $session->id)->where('player_id', $ana->id)->exists())->toBeTrue()
+        ->and(SessionPlayer::where('player_id', $ana->id)->exists())->toBeFalse();
+
+    // Listed players no longer show up in the search results.
+    $panel->set('search', 'Ana')->assertDontSeeHtml('data-test="add-to-list-button"');
+
+    $panel->call('checkIn', $ana->id)->assertHasNoErrors();
+    expect(SessionPlayer::where('player_id', $ana->id)->exists())->toBeTrue();
+});
+
+test('the panel refuses a foreign club player and a player who is not on the list', function () {
+    [$owner, $club] = quickClub();
+    $session = PlaySession::factory()->for($club)->live()->create();
+    $foreign = Player::factory()->for(Club::factory()->create())->create();
+    $unlisted = Player::factory()->for($club)->create();
+
+    Livewire::actingAs($owner)->test(CheckInPanel::class, ['session' => $session])
+        ->call('addToList', $foreign->id)->assertHasErrors('player');
+    Livewire::actingAs($owner)->test(CheckInPanel::class, ['session' => $session])
+        ->call('checkIn', $foreign->id)->assertHasErrors('player');
+    Livewire::actingAs($owner)->test(CheckInPanel::class, ['session' => $session])
+        ->call('checkIn', $unlisted->id)->assertHasErrors('player');
+
+    expect(SessionListPlayer::query()->count())->toBe(0)->and(SessionPlayer::query()->count())->toBe(0);
 });
 
 test('the panel shows a note for a deactivated name', function () {
@@ -71,13 +110,14 @@ test('the panel shows inline validation errors', function () {
         ->set('quick.stars', '')
         ->set('quick.dupr_id', 'nope!')
         ->call('saveQuick')
-        ->assertHasErrors(['quick.stars', 'quick.dupr_id'])
+        ->assertHasErrors(['quick.dupr_id'])
+        ->assertHasNoErrors(['quick.stars'])
         ->assertSee('data-test="quick-add-form"', false);
 
     expect(Player::where('name', 'Bad Input')->exists())->toBeFalse();
 });
 
-test('the form creates a session with picks and new players, all checked in', function () {
+test('the form creates a session with picks and new players, all on the list and nobody checked in', function () {
     [$owner, $club] = quickClub();
     $ana = Player::factory()->for($club)->create(['name' => 'Ana Lopez']);
 
@@ -91,7 +131,7 @@ test('the form creates a session with picks and new players, all checked in', fu
         ->set('quick.stars', '5')
         ->call('addQuick')
         ->assertHasNoErrors()
-        ->assertSee('To check in (2)')
+        ->assertSee('To add (2)')
         ->assertSee('new');
 
     expect(Player::where('name', 'Brand New')->exists())->toBeFalse();
@@ -104,7 +144,8 @@ test('the form creates a session with picks and new players, all checked in', fu
 
     $session = PlaySession::where('club_id', $club->id)->firstOrFail();
     $new = Player::where('name', 'Brand New')->firstOrFail();
-    expect(SessionPlayer::where('play_session_id', $session->id)->pluck('player_id')->all())->toContain($ana->id, $new->id);
+    expect(SessionListPlayer::where('play_session_id', $session->id)->pluck('player_id')->all())->toContain($ana->id, $new->id)
+        ->and(SessionPlayer::where('play_session_id', $session->id)->exists())->toBeFalse();
 });
 
 test('the edit form adds players to a live session and hides already checked in ones', function () {
@@ -116,8 +157,10 @@ test('the edit form adds players to a live session and hides already checked in 
     app(CheckInService::class)->checkIn($session, $in);
 
     Livewire::actingAs($owner)->test(Form::class, ['club' => $club, 'session' => $session])
-        ->assertSeeHtml('data-test="already-checked-in"')
-        ->assertSee('Already checked in (1)')
+        ->assertSeeHtml('data-test="existing-list"')
+        ->assertSee('Already on the list (1)')
+        ->assertSeeHtml('data-test="open-board-link"')
+        ->assertSee('Open board to check in')
         ->call('pick', $picked->id)
         ->set('search', 'Ana')
         ->assertSeeHtml('wire:key="result-'.$free->id.'"')
@@ -126,9 +169,8 @@ test('the edit form adds players to a live session and hides already checked in 
         ->call('save')
         ->assertHasNoErrors();
 
-    $entry = SessionPlayer::where('play_session_id', $session->id)->where('player_id', $picked->id)->first();
-    expect($entry)->not->toBeNull()
-        ->and($entry->status)->not->toBe(SessionPlayerStatus::Left);
+    expect(SessionListPlayer::where('play_session_id', $session->id)->where('player_id', $picked->id)->exists())->toBeTrue()
+        ->and(SessionPlayer::where('play_session_id', $session->id)->where('player_id', $picked->id)->exists())->toBeFalse();
 });
 
 test('a foreign club player id is rejected and nothing is saved', function () {

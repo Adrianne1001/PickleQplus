@@ -86,7 +86,7 @@ trait QuickAddsPlayer
     }
 
     /**
-     * Validate the inline form against the player rules.
+     * Validate the inline form against the player rules. Stars are optional (blank means skill not set).
      *
      * @return array{name: string, stars: ?string, dupr_id: ?string, gender: string}
      *
@@ -97,6 +97,9 @@ trait QuickAddsPlayer
         $input = $this->quickInput();
         $check = [...$input, 'gender' => $input['gender'] === '' ? null : $input['gender']];
         $rules = array_intersect_key($this->playerRules($this->quickClub(), null, ['rating_source' => 'manual'] + $check), array_flip(['name', 'stars', 'dupr_id', 'gender']));
+        if ($input['stars'] === null) {
+            unset($rules['stars']); // optional: a blank value lists the player at 3 stars with "skill not set"
+        }
 
         try {
             Validator::make($check, $rules)->validate();

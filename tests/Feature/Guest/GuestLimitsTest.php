@@ -8,10 +8,12 @@ use App\Models\Player;
 use App\Models\PlaySession;
 use App\Models\SessionPlayer;
 use App\Services\CheckInService;
+use App\Services\PlayerListImportService;
 use App\Services\PlayerService;
 use App\Services\PlaySessionService;
 use App\Services\SelfCheckInService;
 use App\Services\SessionFormService;
+use App\Services\SessionListService;
 use App\Support\GuestOwnerContext;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Validation\ValidationException;
@@ -119,21 +121,18 @@ test('the 41st checked-in player is rejected on every check-in path', function (
     }
     [$extra, $extra2] = guestPlayers($club, 2);
 
-    // Service.
+    // Service and the list's Check In.
     expectGuestLimit(fn () => $checkIns->checkIn($session, $extra), 'player');
-    // Board quick-add: the new player is rolled back with the failed check-in.
-    $before = $club->players()->count();
-    expectGuestLimit(fn () => $checkIns->addNewPlayer($session, ['name' => 'Newbie', 'stars' => 3]), 'player');
-    expect($club->players()->count())->toBe($before);
-    // Session form picks and new players.
-    expectGuestLimit(fn () => app(SessionFormService::class)->save($club, $session, [], [$extra->id]), 'players');
-    expectGuestLimit(fn () => app(SessionFormService::class)->save($club, $session, [], [], [['name' => 'Form New', 'stars' => 3]]), 'players');
-    expect($club->players()->where('name', 'Form New')->exists())->toBeFalse();
-    // Self check-in and self-register.
+    $list = app(SessionListService::class);
+    $list->add($session, [$extra->id, $extra2->id]);
+    expectGuestLimit(fn () => $list->checkIn($session, $extra->id), 'player');
+    // Check in all is best effort: the full session skips everyone with the reason.
+    $all = $list->checkInAll($session);
+    expect($all['checked_in'])->toBe(0)->and($all['skipped'])->toHaveCount(2)
+        ->and($all['skipped'][0]['reason'])->toContain('at most 3 players checked in');
+    // Self check-in (the player has to be listed).
     RateLimiter::clear('selfcheckin:submit:9.9.9.9:'.$session->id);
     expectGuestLimit(fn () => app(SelfCheckInService::class)->checkIn($session, (string) $session->checkin_token, (string) $extra->public_id, '9.9.9.9'), 'player');
-    expectGuestLimit(fn () => app(SelfCheckInService::class)->register($session, (string) $session->checkin_token, 'Walk In', null, 3, '9.9.9.9'), 'player');
-    expect($club->players()->where('name', 'Walk In')->exists())->toBeFalse();
     // The board component.
     app(GuestOwnerContext::class)->set($club);
     Livewire::test(CheckInPanel::class, ['session' => $session])->call('checkIn', $extra2->id)->assertHasErrors('player');
@@ -176,7 +175,7 @@ test('normal clubs have no checked-in cap', function () {
 
 // --- roster ---
 
-test('the 61st player is rejected in the player service, quick add, form and self-register', function () {
+test('the 61st player is rejected in the player service, quick add, form and import', function () {
     config(['pickleq.guest.max_roster' => 3]);
     [$club, $session] = guestBoard();
     $players = app(PlayerService::class);
@@ -185,11 +184,35 @@ test('the 61st player is rejected in the player service, quick add, form and sel
     }
 
     expectGuestLimit(fn () => $players->create($club, ['name' => 'D Four', 'stars' => 3]), 'name');
-    expectGuestLimit(fn () => app(CheckInService::class)->addNewPlayer($session, ['name' => 'D Four', 'stars' => 3]), 'name');
+    expectGuestLimit(fn () => app(SessionListService::class)->addNewPlayer($session, ['name' => 'D Four', 'stars' => 3]), 'name');
     expectGuestLimit(fn () => app(SessionFormService::class)->save($club, $session, [], [], [['name' => 'D Four', 'stars' => 3]]), 'new_players.0.name');
-    expectGuestLimit(fn () => app(SelfCheckInService::class)->register($session, (string) $session->checkin_token, 'D Four', null, 3, '8.8.8.8'), 'register');
+    expectGuestLimit(fn () => app(PlayerListImportService::class)->confirm($session, [['name' => 'D Four', 'source' => 'paste']]), 'players');
 
     expect($club->players()->count())->toBe(3);
+});
+
+// --- listed ---
+
+test('the 61st listed player is rejected on every list path, and normal clubs have no list cap', function () {
+    config(['pickleq.guest.max_listed' => 3]);
+    [$club, $session] = guestBoard();
+    $list = app(SessionListService::class);
+    [$a, $b, $c, $d] = guestPlayers($club, 4);
+    $list->add($session, [$a->id, $b->id, $c->id]);
+
+    expectGuestLimit(fn () => $list->add($session, [$d->id]), 'players');
+    expectGuestLimit(fn () => $list->addNewPlayer($session, ['name' => 'List New', 'stars' => 3]), 'players');
+    expectGuestLimit(fn () => app(SessionFormService::class)->save($club, $session, [], [$d->id]), 'players');
+    expectGuestLimit(fn () => app(SessionFormService::class)->save($club, $session, [], [], [['name' => 'Form New', 'stars' => 3]]), 'players');
+    expectGuestLimit(fn () => app(PlayerListImportService::class)->confirm($session, [['name' => 'Pasted New', 'source' => 'paste'], ['name' => $d->name, 'source' => 'paste']]), 'players');
+    // Listing someone already listed needs no room.
+    expect($list->add($session, [$a->id]))->toBe(0)
+        ->and($club->players()->whereIn('name', ['List New', 'Form New', 'Pasted New'])->exists())->toBeFalse();
+
+    $normal = Club::factory()->create();
+    $open = PlaySession::factory()->for($normal)->create();
+    $list->add($open, array_map(fn (Player $p): int => $p->id, guestPlayers($normal, 5)));
+    expect($open->listPlayers()->count())->toBe(5);
 });
 
 test('editing a player in a full guest roster is fine, and normal clubs have no roster cap', function () {

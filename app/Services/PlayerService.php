@@ -21,7 +21,9 @@ use Throwable;
 class PlayerService
 {
     /**
-     * @param  array{name: string, gender?: Gender|string|null, dupr_id?: string|null, dupr_rating?: float|int|string|null, rating_source?: RatingSource|string|null, stars?: int|null}  $data
+     * `stars_pending: true` (with no rating) marks a player whose skill still has to be set (Phase 16).
+     *
+     * @param  array{name: string, gender?: Gender|string|null, dupr_id?: string|null, dupr_rating?: float|int|string|null, rating_source?: RatingSource|string|null, stars?: int|null, stars_pending?: bool}  $data
      */
     public function create(Club $club, array $data): Player
     {
@@ -175,6 +177,14 @@ class PlayerService
             }
         }
 
+        // "Skill not set" (Phase 16): only a create may start it (import / quick-add without a rating).
+        // Any save that sets stars by hand, or ends with a DUPR rating, clears it.
+        $pending = ! $exists && ($data['stars_pending'] ?? false) === true && $rating === null;
+        if ($exists && $player->stars_pending
+            && ! (array_key_exists('stars', $data) && $data['stars'] !== null) && $rating === null) {
+            $pending = true;
+        }
+
         $player->forceFill([
             'name' => $name,
             'gender' => $gender,
@@ -182,6 +192,7 @@ class PlayerService
             'dupr_rating' => $rating,
             'rating_source' => $source,
             'stars' => $stars,
+            'stars_pending' => $pending,
         ])->save();
 
         return $player;

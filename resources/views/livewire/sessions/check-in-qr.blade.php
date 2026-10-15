@@ -67,6 +67,37 @@
                             @endif
                         </div>
                     </div>
+
+                    @if ($key === 'checkin')
+                        <div class="mt-6 space-y-3 border-t border-zinc-200 pt-5 dark:border-zinc-700" data-test="session-password">
+                            <div>
+                                <h3 class="text-sm font-semibold text-zinc-900 dark:text-white">{{ __('Session password') }}</h3>
+                                <p class="mt-0.5 text-sm text-zinc-700 dark:text-zinc-300">{{ __('Optional. Players enter it to check in from the QR code. Tell them at the venue. Changing it doesn\'t affect players already checked in.') }}</p>
+                            </div>
+
+                            @if ($password_set = ($session->checkin_password !== null && $session->checkin_password !== ''))
+                                <div class="flex flex-wrap items-center gap-2" x-data="{ show: false }" data-test="session-password-current">
+                                    <label for="session-password-value" class="sr-only">{{ __('Current password') }}</label>
+                                    <input id="session-password-value" readonly x-bind:type="show ? 'text' : 'password'" type="password" value="{{ $session->checkin_password }}" class="min-h-11 w-48 rounded-lg border border-zinc-300 bg-zinc-50 px-3 font-mono text-base text-zinc-900 dark:border-zinc-600 dark:bg-zinc-800 dark:text-white" data-test="session-password-value" />
+                                    <flux:button type="button" size="sm" class="min-h-11" x-on:click="show = ! show" x-bind:aria-pressed="show" data-test="session-password-reveal">
+                                        <span x-show="! show">{{ __('Reveal') }}</span>
+                                        <span x-show="show" x-cloak>{{ __('Hide') }}</span>
+                                    </flux:button>
+                                    <flux:button type="button" size="sm" variant="danger" class="min-h-11" wire:click="clearPassword" data-test="session-password-clear">{{ __('Clear') }}</flux:button>
+                                </div>
+                            @else
+                                <p class="text-sm font-medium text-zinc-700 dark:text-zinc-300" data-test="session-password-none">{{ __('No password is set. Anyone on the list can check in.') }}</p>
+                            @endif
+
+                            <form wire:submit="savePassword" class="flex flex-wrap items-start gap-2">
+                                <div class="min-w-48 flex-1 sm:max-w-xs">
+                                    <flux:input wire:model="password" type="text" :label="$password_set ? __('Change password') : __('Set a password')" minlength="4" maxlength="32" autocomplete="off" data-test="session-password-input" />
+                                    <flux:error name="password" />
+                                </div>
+                                <flux:button type="submit" variant="primary" class="mt-6 min-h-11" data-test="session-password-save">{{ $password_set ? __('Change') : __('Save password') }}</flux:button>
+                            </form>
+                        </div>
+                    @endif
                 @endif
             </div>
         @endforeach

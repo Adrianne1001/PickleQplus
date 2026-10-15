@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Concerns\PlayerValidationRules;
 use App\Enums\Gender;
 use App\Enums\LateArrivalPolicy;
+use App\Enums\ListSource;
 use App\Enums\MatchStatus;
 use App\Enums\RatingSource;
 use App\Enums\RotationMode;
@@ -16,6 +17,7 @@ use App\Models\GameMatch;
 use App\Models\MatchPlayer;
 use App\Models\Player;
 use App\Models\PlaySession;
+use App\Models\SessionListPlayer;
 use App\Models\SessionPlayer;
 use App\Models\User;
 use App\Rules\DuprPlayerId;
@@ -35,6 +37,9 @@ class CheckInService
     use LocksPlaySession;
     use PlayerValidationRules;
 
+    /** Stars given to a player whose skill is not set yet (Phase 16). */
+    public const PENDING_STARS = 3;
+
     public function __construct(private readonly MatchService $matches, private readonly PlayerService $players) {}
 
     /**
@@ -50,44 +55,31 @@ class CheckInService
     }
 
     /**
-     * Create a new club player and check them in, in one transaction, while the
-     * session is draft or live. Error keys: name, stars, dupr_id, gender, session.
+     * Validate and create a staff player (no self-registration fields). Stars given: a manual
+     * player. Stars blank and no rating: 3 stars with "skill not set" (stars_pending). A rating
+     * (`dupr_rating`): a DUPR-sourced player with stars from the club bands. Error keys are
+     * prefixed with $prefix (e.g. "new_players.0.").
      *
-     * @param  array{name?: mixed, stars?: mixed, dupr_id?: mixed, gender?: mixed}  $data
-     *
-     * @throws ValidationException
-     */
-    public function addNewPlayer(PlaySession $session, array $data): SessionPlayer
-    {
-        $this->guardGuestActive($session);
-
-        return DB::transaction(function () use ($session, $data): SessionPlayer {
-            // Lock order club -> session, as PlaySessionService::start().
-            $club = Club::query()->whereKey($session->club_id)->lockForUpdate()->firstOrFail();
-            $this->lockSession($session);
-            $this->guardOpen($session);
-
-            $player = $this->createQuickPlayer($club, $data);
-
-            return $this->checkIn($session, $player, checkExpiry: false);
-        });
-    }
-
-    /**
-     * Validate and create a manual-rating staff player (no self-registration fields).
-     * Error keys are prefixed with $prefix (e.g. "new_players.0.").
-     *
-     * @param  array{name?: mixed, stars?: mixed, dupr_id?: mixed, gender?: mixed}  $data
+     * @param  array{name?: mixed, stars?: mixed, dupr_id?: mixed, gender?: mixed, dupr_rating?: mixed}  $data
      *
      * @throws ValidationException
      */
     public function createQuickPlayer(Club $club, array $data, string $prefix = ''): Player
     {
-        $input = [
-            'name' => is_string($data['name'] ?? null) ? trim($data['name']) : ($data['name'] ?? null),
-            'stars' => $data['stars'] ?? null,
-            'rating_source' => RatingSource::Manual->value,
-        ];
+        $rating = $data['dupr_rating'] ?? null;
+        $rating = is_string($rating) || is_int($rating) || is_float($rating) ? trim((string) $rating) : '';
+        $hasRating = $rating !== '';
+        $stars = $data['stars'] ?? null;
+        $hasStars = $stars !== null && $stars !== '';
+
+        $input = ['name' => is_string($data['name'] ?? null) ? trim($data['name']) : ($data['name'] ?? null)];
+        if ($hasRating) {
+            $input['dupr_rating'] = $rating;
+            $input['rating_source'] = RatingSource::Dupr->value;
+        } elseif ($hasStars) {
+            $input['stars'] = $stars;
+            $input['rating_source'] = RatingSource::Manual->value;
+        }
         if (array_key_exists('dupr_id', $data)) {
             $input['dupr_id'] = DuprPlayerId::normalize($data['dupr_id']);
         }
@@ -96,16 +88,27 @@ class CheckInService
         }
 
         try {
-            $rules = array_intersect_key($this->playerRules($club, null, $input), array_flip(['name', 'stars', 'dupr_id', 'gender']));
+            $rules = array_intersect_key($this->playerRules($club, null, $input), array_flip(['name', 'stars', 'dupr_id', 'gender', 'dupr_rating']));
+            if (! $hasStars) {
+                unset($rules['stars']); // blank stars are allowed here: the player gets "skill not set"
+            }
             $valid = Validator::make($input, $rules)->validate();
 
-            return $this->players->create($club, [
+            $create = [
                 'name' => (string) $valid['name'],
-                'stars' => (int) $valid['stars'],
                 'dupr_id' => isset($valid['dupr_id']) ? (string) $valid['dupr_id'] : null,
                 'gender' => isset($valid['gender']) ? (string) $valid['gender'] : null,
-                'rating_source' => RatingSource::Manual->value,
-            ]);
+            ];
+            if ($hasRating) {
+                $create['dupr_rating'] = $rating;
+                $create['rating_source'] = RatingSource::Dupr->value;
+            } else {
+                $create['rating_source'] = RatingSource::Manual->value;
+                $create['stars'] = $hasStars ? (int) $valid['stars'] : self::PENDING_STARS;
+                $create['stars_pending'] = ! $hasStars;
+            }
+
+            return $this->players->create($club, $create);
         } catch (ValidationException $e) {
             $errors = [];
             foreach ($e->errors() as $key => $messages) {
@@ -145,6 +148,18 @@ class CheckInService
             if (! $fresh->active) {
                 throw ValidationException::withMessages(['player' => 'Inactive players cannot be checked in.']);
             }
+
+            // Everyone checked in is on the session's list (Phase 16). An INSERT IGNORE is not a read,
+            // so it keeps the race-safety rule below.
+            $now = Carbon::now();
+            SessionListPlayer::query()->insertOrIgnore([[
+                'play_session_id' => $session->id,
+                'player_id' => $player->id,
+                'source' => ListSource::Manual->value,
+                'added_by_user_id' => null,
+                'created_at' => $now,
+                'updated_at' => $now,
+            ]]);
 
             $entry = SessionPlayer::query()
                 ->where('play_session_id', $session->id)
@@ -259,7 +274,8 @@ class CheckInService
     }
 
     /**
-     * Staff: remove a bogus check-in. The session_players row is deleted only
+     * Staff: remove a bogus check-in. The player stays on the session's list (back to Not Yet Here).
+     * The session_players row is deleted only
      * when the player has no staged, playing or done match in this session
      * (otherwise use check-out). A player who self-registered in this session
      * (players.self_registered_session_id), with no match anywhere and no

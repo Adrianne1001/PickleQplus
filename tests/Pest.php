@@ -17,6 +17,7 @@ use App\Services\InvitationService;
 use App\Services\RosterImport\RosterImportPreview;
 use App\Services\RosterImport\RosterImportRow;
 use App\Services\RosterImportService;
+use App\Services\SessionListService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Str;
@@ -117,6 +118,14 @@ function board(int $n, array $attrs = []): array
     }
 
     return [$session->fresh(), $players];
+}
+
+/**
+ * Put players on a session's list (Phase 16), as staff do before check-in opens.
+ */
+function listPlayers(PlaySession $session, Player ...$players): void
+{
+    app(SessionListService::class)->add($session, array_map(fn (Player $p): int => $p->id, $players));
 }
 
 function stagedOf(PlaySession $s)

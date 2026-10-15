@@ -47,7 +47,11 @@
                 <a href="{{ $queueUrl }}" class="flex min-h-14 items-center justify-center rounded-xl bg-white px-5 py-3 text-lg font-bold text-brand-800 hover:bg-brand-50" data-test="queue-link">{{ __('See the queue') }}</a>
             </section>
         @elseif (! $errors->has('session'))
-            @if (! $registering)
+            @if ($listEmpty)
+                <section wire:poll.20s data-test="checkin-no-list">
+                    <x-empty-state icon="clipboard-document-list" :title="__('The player list is empty')" :description="__('Ask the organizer to add you to the player list.')" />
+                </section>
+            @else
                 <section class="space-y-4" data-test="checkin-search-section">
                     <div>
                         <label for="search" class="block text-lg font-semibold">{{ __('Find your name') }}</label>
@@ -63,10 +67,18 @@
                     </div>
 
                     @if ($selected)
-                        <div class="space-y-4 rounded-2xl border-2 border-brand-600 bg-white p-5 shadow-xs dark:border-brand-400 dark:bg-zinc-900" data-test="checkin-confirm">
+                        <form wire:submit="confirm" class="space-y-4 rounded-2xl border-2 border-brand-600 bg-white p-5 shadow-xs dark:border-brand-400 dark:bg-zinc-900" data-test="checkin-confirm">
                             <p class="text-xl font-semibold">
                                 {{ __('Check in as :name?', ['name' => $selected['name']]) }}
                             </p>
+                            @if ($requiresPassword)
+                                <div data-test="checkin-password">
+                                    <label for="password" class="block font-medium">{{ __('Session password') }}</label>
+                                    <input id="password" type="text" wire:model="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-describedby="password-hint" @error('password') aria-invalid="true" @enderror class="{{ $input }}" />
+                                    <p id="password-hint" class="mt-1 text-sm text-zinc-600 dark:text-zinc-400">{{ __('Ask the organizer for the password.') }}</p>
+                                    @error('password') <p class="{{ $errorText }}" role="alert" data-test="error-password">{{ $message }}</p> @enderror
+                                </div>
+                            @endif
                             @if ($needsGender)
                                 <fieldset data-test="checkin-gender">
                                     <legend class="block font-medium">{{ __('Gender (optional)') }}</legend>
@@ -82,10 +94,10 @@
                                 </fieldset>
                             @endif
                             <div class="flex gap-3">
-                                <button type="button" wire:click="confirm" class="{{ $primaryBtn }} flex-1" data-test="checkin-confirm-button">{{ __('Yes, check me in') }}</button>
-                                <button type="button" wire:click="cancelSelect" class="{{ $secondaryBtn }}">{{ __('Cancel') }}</button>
+                                <button type="submit" class="{{ $primaryBtn }} flex-1" data-test="checkin-confirm-button">{{ __('Yes, check me in') }}</button>
+                                <button type="button" wire:click="cancelSelect" class="{{ $secondaryBtn }}" data-test="checkin-cancel-button">{{ __('Cancel') }}</button>
                             </div>
-                        </div>
+                        </form>
                     @elseif (mb_strlen(trim($search)) >= 2)
                         <ul class="divide-y divide-zinc-200 overflow-hidden rounded-2xl border border-zinc-200 bg-white dark:divide-zinc-700 dark:border-zinc-700 dark:bg-zinc-900" data-test="checkin-results">
                             @forelse ($results as $row)
@@ -104,64 +116,11 @@
                                     </button>
                                 </li>
                             @empty
-                                <li class="px-4 py-4 text-zinc-600 dark:text-zinc-400">{{ __('No match. Try another spelling, or register below.') }}</li>
+                                <li class="px-4 py-4 text-lg text-zinc-700 dark:text-zinc-300" data-test="checkin-no-match">{{ __('No match. Check the spelling.') }} <strong class="font-semibold">{{ __('Not on the list? Ask the organizer.') }}</strong></li>
                             @endforelse
                         </ul>
                     @endif
-
-                    <button type="button" wire:click="startRegister" class="{{ $secondaryBtn }} w-full" data-test="im-new">{{ __("I'm new") }}</button>
                 </section>
-            @else
-                <form wire:submit="register" class="space-y-5 rounded-2xl border border-zinc-200 bg-white p-5 shadow-xs dark:border-zinc-700 dark:bg-zinc-900" data-test="register-form">
-                    <h2 class="text-2xl font-bold tracking-tight">{{ __("I'm new") }}</h2>
-                    @error('register')
-                        <div role="alert" class="rounded-xl border border-red-300 bg-red-50 p-4 font-medium text-red-900 dark:border-red-800 dark:bg-red-950 dark:text-red-100" data-test="register-error">{{ $message }}</div>
-                    @enderror
-
-                    <div>
-                        <label for="regName" class="block font-medium">{{ __('Name') }}</label>
-                        <input id="regName" type="text" wire:model="regName" maxlength="120" required autocomplete="off" class="{{ $input }}" />
-                        <p class="mt-1 text-sm text-zinc-600 dark:text-zinc-400">{{ __('The name everyone will see on the queue: your name or a nickname.') }}</p>
-                        @error('name') <p class="{{ $errorText }}" data-test="error-name">{{ $message }}</p> @enderror
-                    </div>
-                    <div>
-                        <label for="regDuprId" class="block font-medium">{{ __('DUPR ID (optional)') }}</label>
-                        <input id="regDuprId" type="text" wire:model="regDuprId" maxlength="6" autocomplete="off" class="{{ $input }} uppercase" />
-                        @error('dupr_id') <p class="{{ $errorText }}" data-test="error-dupr_id">{{ $message }}</p> @enderror
-                    </div>
-
-                    <fieldset data-test="register-gender">
-                        <legend class="font-medium">{{ __('Gender (optional)') }}</legend>
-                        <div class="mt-2 flex flex-wrap gap-2">
-                            @foreach (['man' => __('Man'), 'woman' => __('Woman'), '' => __('Prefer not to say')] as $value => $label)
-                                <label class="{{ $choice }}">
-                                    <input type="radio" wire:model="regGender" value="{{ $value }}" class="size-5 accent-brand-700" />
-                                    {{ $label }}
-                                </label>
-                            @endforeach
-                        </div>
-                        @error('gender') <p class="{{ $errorText }}" data-test="error-gender">{{ $message }}</p> @enderror
-                    </fieldset>
-
-                    <fieldset>
-                        <legend class="font-medium">{{ __('How would you rate your level?') }}</legend>
-                        <div class="mt-2 grid gap-2" data-test="stars-options">
-                            @foreach ($levels as $value => $description)
-                                <label class="{{ $choice }} gap-3 !py-3">
-                                    <input type="radio" wire:model="regStars" value="{{ $value }}" class="size-5 shrink-0 accent-brand-700" />
-                                    <span class="flex min-w-14 items-center gap-1 text-xl font-bold tabular-nums">{{ $value }} <span aria-hidden="true" class="text-amber-500">&#9733;</span></span>
-                                    <span class="text-base font-normal">{{ __($description) }}</span>
-                                </label>
-                            @endforeach
-                        </div>
-                        @error('stars') <p class="{{ $errorText }}" data-test="error-stars">{{ $message }}</p> @enderror
-                    </fieldset>
-
-                    <div class="flex gap-3">
-                        <button type="submit" class="{{ $primaryBtn }} flex-1" data-test="register-submit">{{ __('Register and check in') }}</button>
-                        <button type="button" wire:click="cancelRegister" class="{{ $secondaryBtn }}">{{ __('Back') }}</button>
-                    </div>
-                </form>
             @endif
         @endif
     @endif
