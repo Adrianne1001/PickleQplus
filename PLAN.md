@@ -281,6 +281,18 @@ Phase 7 additions (P7.4, see `docs/design/p7.4-rotation-modes.md`): `players.gen
   - It attaches the user as owner, clears the guest columns, sets `guest_claimed_at`, and allows a rename. The slug is kept, so live links keep working.
   - The first claim wins. Claim vs purge is safe because both lock the club row.
 
+**Phase 15 rules: board full screen (decided 2026-10-15, user request; change here first if needed):**
+- **Goal (user request):** the organizer can run a session on a tablet or laptop with nothing but the board on screen. No app sidebar, no browser bars, no extra page chrome.
+- **Where:** the organizer board (`clubs.sessions.show`) only, for members and guests, in draft and live sessions (not ended). A "Full screen" button sits with the session actions.
+- **What it does:** one tap turns on **board full screen**:
+  - It hides the app sidebar and mobile top bar (members), the guest top bar (guests), the back link and the page header's description line, and lets the board use the full width.
+  - It keeps the session name, the status badge, the session actions, the guest countdown banner (guests must still see the expiry) and flash messages.
+  - It asks the browser for real full screen (Fullscreen API on the whole page) where supported, and holds a best-effort screen wake lock while on.
+  - Where the Fullscreen API is missing (e.g. iPhone Safari), it still hides the app chrome. That's the fallback, not an error.
+- **Leaving:** an always-visible "Exit full screen" button. Leaving browser full screen (Esc, swipe, system gesture) also turns board full screen off, so the two never disagree. Navigating away from the board (including `wire:navigate`) turns it off and exits browser full screen.
+- **State:** client-side only (Alpine). No database column or setting. It survives Livewire re-renders and polling, but not a page reload (browsers only grant full screen from a tap).
+- **No new packages.** Reuse the TV page's full screen and wake lock code (`resources/js/public-pages.js`) via a shared helper rather than copying it.
+
 ---
 
 ## 3. Balanced rotation engine
@@ -546,6 +558,10 @@ Rules: "wins" means this session's wins only, counted as in the Phase 5 rules (`
 - [x] **P14.10** Tests: authorization matrix (guest vs member vs stranger on every club route), MySQL lock tests (limit races, claim vs purge), purge file checks.
 - [x] **P14.11** Dev and ops: `schedule:work` in the dev script and README, scheduler cron noted for P6.3, secure cookie settings for production.
 - [ ] **P14.12** Manual check: start as guest, open the organizer link on a second device, run a session, wait for or force expiry, see the purge and the expired page, and claim via sign-up.
+
+### Phase 15 — Board full screen *(branch `feature/p15-board-full-screen`; added 2026-10-15, user request; see Phase 15 rules)*
+- [x] **P15.1** Board full screen toggle (see Phase 15 rules): button in the session actions, hides sidebar / mobile header / guest top bar / back link / description, Fullscreen API where supported with chrome-only fallback, wake lock, "Exit full screen", sync with browser full screen exit and navigation away. Shared full screen and wake lock helper used by the board and the TV page. Livewire and feature tests (button shown for draft and live, not ended; members and guests; TV page unchanged).
+- [ ] **P15.2** Manual browser check: a tablet (Android Chrome and iPad Safari), a laptop, and an iPhone (chrome-only fallback), in light and dark. Enter and exit with the button and with Esc or a swipe, polling and broadcasts while in full screen, the end-session modal and other modals in full screen, and navigating to Edit and Results.
 
 ---
 

@@ -15,7 +15,7 @@
 <header {{ $attributes->class(['mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between lg:mb-8']) }} data-ui="page-header">
     <div class="min-w-0">
         @if ($back)
-            <a href="{{ $back }}" wire:navigate class="mb-2 inline-flex items-center gap-1 text-sm font-medium text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white">
+            <a href="{{ $back }}" wire:navigate class="board-chrome mb-2 inline-flex items-center gap-1 text-sm font-medium text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white">
                 <flux:icon.chevron-left class="size-4" />
                 {{ $backLabel ?? __('Back') }}
             </a>
@@ -28,7 +28,7 @@
         <h1 class="text-2xl font-bold tracking-tight text-zinc-900 sm:text-3xl dark:text-white">{{ $title }}</h1>
 
         @if ($description)
-            <p class="mt-1.5 max-w-2xl text-sm text-zinc-600 sm:text-base dark:text-zinc-400">{{ $description }}</p>
+            <p class="board-chrome mt-1.5 max-w-2xl text-sm text-zinc-600 sm:text-base dark:text-zinc-400">{{ $description }}</p>
         @endif
 
         {{ $slot }}
