@@ -200,11 +200,9 @@ test('set skill sets the stars and clears the pending flag, keeping the rating s
     Event::assertDispatched(PlaySessionChanged::class);
 });
 
-test('set skill validates the stars, the club, the list and that the skill is pending', function () {
+test('set skill validates the stars, the club and the list', function () {
     $session = PlaySession::factory()->create();
     $pending = listSvc()->addNewPlayer($session, ['name' => 'Pending Pat']);
-    $set = Player::factory()->for($session->club)->manual(2)->create();
-    listSvc()->add($session, [$set->id]);
     $unlisted = Player::factory()->for($session->club)->create();
     $unlisted->forceFill(['stars_pending' => true])->save();
     $foreign = Player::factory()->manual(2)->create();
@@ -213,11 +211,36 @@ test('set skill validates the stars, the club, the list and that the skill is pe
     expect(listErrors(fn () => listSvc()->setSkill($session, $pending->id, 0)))->toHaveKey('stars')
         ->and(listErrors(fn () => listSvc()->setSkill($session, $pending->id, 7)))->toHaveKey('stars')
         ->and(listErrors(fn () => listSvc()->setSkill($session, $pending->id, 'x')))->toHaveKey('stars')
-        ->and(listErrors(fn () => listSvc()->setSkill($session, $set->id, 4)))->toHaveKey('player')
         ->and(listErrors(fn () => listSvc()->setSkill($session, $unlisted->id, 4)))->toHaveKey('player')
         ->and(listErrors(fn () => listSvc()->setSkill($session, $foreign->id, 4)))->toHaveKey('player')
         ->and($pending->fresh()->stars_pending)->toBeTrue()
         ->and($foreign->fresh()->stars)->toBe(2);
+});
+
+test('set skill lets staff change the stars of a manual player whose skill is already set', function () {
+    $session = PlaySession::factory()->create();
+    $set = Player::factory()->for($session->club)->manual(2)->create();
+    listSvc()->add($session, [$set->id]);
+    expect($set->fresh()->stars_pending)->toBeFalse();
+
+    $updated = listSvc()->setSkill($session, $set->id, 5);
+
+    expect($updated->stars)->toBe(5)->and($updated->stars_pending)->toBeFalse()
+        ->and($set->fresh()->stars)->toBe(5)->and($set->fresh()->rating_source)->toBe(RatingSource::Manual);
+});
+
+test('set skill refuses a DUPR-rated player and changes nothing', function () {
+    $session = PlaySession::factory()->create();
+    $rated = Player::factory()->for($session->club)->rated(4.2)->create(['name' => 'Rae Rated']);
+    listSvc()->add($session, [$rated->id]);
+    $before = $rated->fresh()->stars;
+
+    $errors = listErrors(fn () => listSvc()->setSkill($session, $rated->id, 1));
+
+    expect($errors)->toHaveKey('player')
+        ->and($errors['player'][0])->toBe("Rae Rated's stars come from their DUPR rating.")
+        ->and($rated->fresh()->stars)->toBe($before)
+        ->and($rated->fresh()->rating_source)->toBe(RatingSource::Dupr);
 });
 
 test('saving stars on the player form path clears the pending flag, and an unrelated edit keeps it', function () {

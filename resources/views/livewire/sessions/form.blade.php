@@ -165,6 +165,7 @@
                     @endif
 
                     <x-quick-add-player
+                        :levels="\App\Domain\Stars\StarLevels::forClub($club)"
                         :open="$quickOpen"
                         :term="trim($search)"
                         :show="$quickAdd['show']"

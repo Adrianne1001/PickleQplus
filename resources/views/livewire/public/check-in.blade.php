@@ -93,6 +93,14 @@
                                     @error('gender') <p class="{{ $errorText }}" data-test="error-gender">{{ $message }}</p> @enderror
                                 </fieldset>
                             @endif
+                            @if ($starsPending && $levels !== [])
+                                <fieldset class="space-y-2" data-test="checkin-skill">
+                                    <legend class="block font-medium">{{ __('Your skill level (optional)') }}</legend>
+                                    <p class="text-sm text-zinc-600 dark:text-zinc-400">{{ __('Tap a star to see what it means. Not sure? Skip it and just check in; the organizer can set it later.') }}</p>
+                                    <x-star-picker model="stars" :label="__('Your skill level')" :levels="$levels" :clearable="true" :empty="0" />
+                                    @error('stars') <p class="{{ $errorText }}" role="alert" data-test="error-stars">{{ $message }}</p> @enderror
+                                </fieldset>
+                            @endif
                             <div class="flex gap-3">
                                 <button type="submit" class="{{ $primaryBtn }} flex-1" data-test="checkin-confirm-button">{{ __('Yes, check me in') }}</button>
                                 <button type="button" wire:click="cancelSelect" class="{{ $secondaryBtn }}" data-test="checkin-cancel-button">{{ __('Cancel') }}</button>

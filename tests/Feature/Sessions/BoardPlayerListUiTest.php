@@ -136,7 +136,8 @@ test('quick-add with blank stars lists the player at 3 stars and shows Set skill
         ->call('saveQuick')
         ->assertHasNoErrors()
         ->assertSeeHtml('data-test="skill-pending"')
-        ->assertSeeHtml('data-test="set-skill-link"')
+        ->assertDontSeeHtml('data-test="set-skill-link"')
+        ->assertSeeHtml('data-test="skill-placeholder"')
         ->assertSee('Set skill');
 
     $player = Player::where('club_id', $club->id)->where('name', 'Newbie Nat')->firstOrFail();
@@ -148,46 +149,89 @@ test('quick-add with blank stars lists the player at 3 stars and shows Set skill
     expect(Player::where('name', 'Chosen Cy')->firstOrFail()->stars_pending)->toBeFalse();
 });
 
-test('Set skill opens the star picker, saves the stars and clears the prompt', function () {
+test('a tap on a star saves the skill at once for a pending player, with no Set skill link or Save step', function () {
     [$owner, $club, $session] = uiBoard();
     $pending = Player::factory()->for($club)->create(['name' => 'Pat Pending', 'stars' => 3, 'stars_pending' => true]);
     listPlayers($session, $pending);
 
     Livewire::actingAs($owner)->test(CheckInPanel::class, ['session' => $session])
-        ->assertSeeHtml('data-test="set-skill-link"')
-        ->assertDontSeeHtml('data-test="skill-picker"')
-        ->call('openSkill', $pending->id)
-        ->assertSeeHtml('data-test="skill-picker"')
+        ->assertSeeHtml('data-test="skill-pending"')
+        ->assertSeeHtml('data-test="skill-placeholder"')
         ->assertSeeHtml('data-test="star-5"')
-        ->assertSeeHtml('data-test="save-skill-button"')
-        ->call('saveSkill')
-        ->assertHasErrors('stars')
-        ->assertSeeHtml('data-test="skill-error"')
-        ->set('skillStars', '5')
-        ->call('saveSkill')
-        ->assertHasNoErrors()
+        ->assertDontSeeHtml('data-test="set-skill-link"')
+        ->assertDontSeeHtml('data-test="save-skill-button"')
         ->assertDontSeeHtml('data-test="skill-picker"')
-        ->assertDontSeeHtml('data-test="set-skill-link"');
+        ->call('setSkill', $pending->id, 5)
+        ->assertHasNoErrors()
+        ->assertDontSeeHtml('data-test="skill-pending"')
+        ->assertDontSeeHtml('data-test="skill-placeholder"')
+        ->assertSeeHtml('data-test="skill-level-current"')
+        ->assertSee('★5 · Advanced');
 
     expect($pending->fresh()->stars)->toBe(5)->and($pending->fresh()->stars_pending)->toBeFalse();
 });
 
-test('Cancel closes the star picker without saving', function () {
+test('staff can tap a different star on a manual player who is already set', function () {
+    [$owner, $club, $session] = uiBoard();
+    $set = Player::factory()->for($club)->manual(2)->create(['name' => 'Sam Set']);
+    listPlayers($session, $set);
+
+    Livewire::actingAs($owner)->test(CheckInPanel::class, ['session' => $session])
+        ->assertSeeHtml('data-test="star-4"')
+        ->assertSee('★2 · Novice')
+        ->call('setSkill', $set->id, 4)
+        ->assertHasNoErrors()
+        ->assertSee('★4 · Upper intermediate');
+
+    expect($set->fresh()->stars)->toBe(4);
+});
+
+test('an out-of-range star tap shows the stars error and saves nothing', function () {
     [$owner, $club, $session] = uiBoard();
     $pending = Player::factory()->for($club)->create(['stars' => 3, 'stars_pending' => true]);
     listPlayers($session, $pending);
 
     Livewire::actingAs($owner)->test(CheckInPanel::class, ['session' => $session])
-        ->call('openSkill', $pending->id)
-        ->set('skillStars', '6')
-        ->call('cancelSkill')
-        ->assertDontSeeHtml('data-test="skill-picker"')
-        ->assertSet('skillStars', '');
+        ->call('setSkill', $pending->id, 9)
+        ->assertHasErrors('stars')
+        ->assertSeeHtml('data-test="check-in-error"');
 
     expect($pending->fresh()->stars_pending)->toBeTrue();
 });
 
-test('the checked-in list also offers Set skill for a pending player', function () {
+test('DUPR-rated players show read-only stars with their level and a tap is refused', function () {
+    [$owner, $club, $session] = uiBoard();
+    $rated = Player::factory()->for($club)->rated(3.7)->create(['name' => 'Dee Rated']);
+    listPlayers($session, $rated);
+
+    Livewire::actingAs($owner)->test(CheckInPanel::class, ['session' => $session])
+        ->assertSeeHtml('data-test="skill-stars"')
+        ->assertDontSeeHtml('data-test="star-4"')
+        ->assertSeeHtml('data-test="star-static-4"')
+        ->assertSee('★4 · Upper intermediate')
+        ->assertSee('DUPR ~3.50–3.99')
+        ->call('setSkill', $rated->id, 2)
+        ->assertHasErrors('player')
+        ->assertSeeHtml('data-test="check-in-error"');
+
+    expect($rated->fresh()->stars)->toBe(4);
+});
+
+test('the level descriptions follow each club own star bands', function () {
+    [$owner, $club, $session] = uiBoard();
+    $club->forceFill(['star_bands' => [2.0, 2.75, 3.25, 4.0, 5.0]])->save();
+    $two = Player::factory()->for($club)->manual(2)->create();
+    $six = Player::factory()->for($club)->manual(6)->create();
+    listPlayers($session, $two, $six);
+
+    Livewire::actingAs($owner)->test(CheckInPanel::class, ['session' => $session->fresh()])
+        ->assertSee('DUPR ~2.00–2.74')
+        ->assertSee('DUPR 5.00+')
+        ->assertSee('2.75')
+        ->assertSeeHtml('data-test="skill-level"');
+});
+
+test('the checked-in list has the same direct stars for a pending player', function () {
     [$owner, $club, $session] = uiBoard();
     $pending = Player::factory()->for($club)->create(['name' => 'Pat Pending', 'stars' => 3, 'stars_pending' => true]);
     listPlayers($session, $pending);
@@ -195,15 +239,25 @@ test('the checked-in list also offers Set skill for a pending player', function 
 
     Livewire::actingAs($owner)->test(CheckInPanel::class, ['session' => $session])
         ->assertSeeHtml('data-test="checked-in-row"')
-        ->assertSeeHtml('data-test="set-skill-link"')
-        ->call('openSkill', $pending->id)
-        ->assertSeeHtml('data-test="skill-picker"')
-        ->set('skillStars', '4')
-        ->call('saveSkill')
+        ->assertSeeHtml('data-test="skill-pending"')
+        ->assertDontSeeHtml('data-test="set-skill-link"')
+        ->call('setSkill', $pending->id, 4)
         ->assertHasNoErrors()
-        ->assertDontSeeHtml('data-test="set-skill-link"');
+        ->assertDontSeeHtml('data-test="skill-pending"');
 
-    expect($pending->fresh()->stars)->toBe(4);
+    expect($pending->fresh()->stars)->toBe(4)->and($pending->fresh()->stars_pending)->toBeFalse();
+});
+
+test('the quick-add star picker describes each level too', function () {
+    [$owner, $club, $session] = uiBoard();
+    $club->forceFill(['star_bands' => [2.0, 2.75, 3.25, 4.0, 5.0]])->save();
+
+    Livewire::actingAs($owner)->test(CheckInPanel::class, ['session' => $session->fresh()])
+        ->set('search', 'Newbie Nat')
+        ->call('openQuickAdd')
+        ->assertSeeHtml('data-test="quick-stars"')
+        ->assertSeeHtml('data-test="star-level-2"')
+        ->assertSee('DUPR ~2.00–2.74');
 });
 
 test('the import result shows as a flash that can be dismissed', function () {
@@ -234,7 +288,7 @@ test('an import event with an unknown or empty token shows nothing', function ()
         ->assertDontSeeHtml('data-test="import-result"');
 });
 
-test('Set skill is not offered on an ended session', function () {
+test('stars are read-only on an ended session', function () {
     [$owner, $club, $session] = uiBoard();
     $pending = Player::factory()->for($club)->create(['stars' => 3, 'stars_pending' => true]);
     listPlayers($session, $pending);
@@ -243,7 +297,14 @@ test('Set skill is not offered on an ended session', function () {
 
     Livewire::actingAs($owner)->test(CheckInPanel::class, ['session' => $session->fresh()])
         ->assertSeeHtml('data-test="checked-in-row"')
-        ->assertDontSeeHtml('data-test="set-skill-link"');
+        ->assertDontSeeHtml('data-test="set-skill-link"')
+        ->assertDontSeeHtml('data-test="star-4"')
+        ->assertSeeHtml('data-test="star-static-4"')
+        ->assertSee('Skill not set')
+        ->call('setSkill', $pending->id, 4)
+        ->assertHasErrors();
+
+    expect($pending->fresh()->stars_pending)->toBeTrue();
 });
 
 test('the session password never appears on the public check-in page, the TV or the public queue', function () {

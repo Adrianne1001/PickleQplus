@@ -2,6 +2,7 @@
 
 namespace App\Livewire\Sessions;
 
+use App\Domain\Stars\StarLevels;
 use App\Enums\SessionPlayerStatus;
 use App\Livewire\Sessions\Concerns\QuickAddsPlayer;
 use App\Models\Club;
@@ -35,13 +36,6 @@ class CheckInPanel extends Component
     public PlaySession $session;
 
     public string $search = '';
-
-    /** Player whose "Set skill" star picker is open (Not Yet Here or the checked-in list). */
-    #[Locked]
-    public ?int $skillFor = null;
-
-    /** The star picker's value for $skillFor. */
-    public string $skillStars = '';
 
     /**
      * What the last import did, shown until dismissed.
@@ -79,7 +73,6 @@ class CheckInPanel extends Component
         $this->authorize('manage', $this->session);
 
         $list->checkIn($this->session, $playerId);
-        $this->closeSkillFor($playerId);
     }
 
     /**
@@ -98,36 +91,18 @@ class CheckInPanel extends Component
         $this->authorize('manage', $this->session);
 
         $list->remove($this->session, $playerId);
-        $this->closeSkillFor($playerId);
     }
 
-    public function openSkill(int $playerId): void
+    /**
+     * A tap on a star saves the player's skill at once (no Save step). The service allows any
+     * manual-rated listed player, pending or not, and clears the "Set skill" flag.
+     */
+    public function setSkill(SessionListService $list, int $playerId, int $stars): void
     {
         $this->authorize('manage', $this->session);
 
-        $this->resetErrorBag(['stars']);
-        $this->skillFor = $playerId;
-        $this->skillStars = '';
-    }
-
-    public function cancelSkill(): void
-    {
-        $this->skillFor = null;
-        $this->skillStars = '';
-        $this->resetErrorBag(['stars']);
-    }
-
-    /** Save the picked stars for the player whose picker is open; this clears "Set skill". */
-    public function saveSkill(SessionListService $list): void
-    {
-        $this->authorize('manage', $this->session);
-
-        if ($this->skillFor === null) {
-            return;
-        }
-
-        $list->setSkill($this->session, $this->skillFor, $this->skillStars);
-        $this->cancelSkill();
+        $this->resetErrorBag(['stars', 'player']);
+        $list->setSkill($this->session, $playerId, $stars);
     }
 
     /** Hide the import and check-in-all results. */
@@ -171,13 +146,6 @@ class CheckInPanel extends Component
             'notes' => array_slice($notes, 0, 20),
         ];
         $this->checkInAllResult = null;
-    }
-
-    private function closeSkillFor(int $playerId): void
-    {
-        if ($this->skillFor === $playerId) {
-            $this->cancelSkill();
-        }
     }
 
     /** Search result tap: put the player on the session's list. Nobody is checked in by this. */
@@ -271,6 +239,17 @@ class CheckInPanel extends Component
     public function notYetHere(): Collection
     {
         return app(SessionListService::class)->notYetHere($this->session);
+    }
+
+    /**
+     * The club's star levels (label, hint, DUPR range from its bands) for the skill stars.
+     *
+     * @return list<array{stars: int, label: string, hint: string, min: float|null, max: float|null, max_inclusive: bool, decimals: int}>
+     */
+    #[Computed]
+    public function levels(): array
+    {
+        return StarLevels::forClub($this->session->club ?? abort(404));
     }
 
     /**

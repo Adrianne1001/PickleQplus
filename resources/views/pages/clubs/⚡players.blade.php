@@ -666,7 +666,7 @@ new #[Title('Players')] class extends Component {
             @else
                 <flux:field data-test="manual-stars">
                     <flux:label>{{ __('Stars') }}</flux:label>
-                    <x-star-picker model="stars" :label="__('Stars')" />
+                    <x-star-picker model="stars" :label="__('Stars')" :levels="\App\Domain\Stars\StarLevels::forClub($club)" />
                     <flux:error name="stars" />
                 </flux:field>
                 @unless ($hasRating)

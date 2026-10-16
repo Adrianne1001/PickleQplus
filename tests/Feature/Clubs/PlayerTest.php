@@ -99,6 +99,22 @@ test('manual stars use a six-star radio picker, not a dropdown, and the error sh
     expect($club->players()->firstOrFail()->stars)->toBe(4);
 });
 
+test('the star picker describes each level with the DUPR range from the club bands', function () {
+    [$user, $club] = memberOf();
+    $club->forceFill(['star_bands' => [2.0, 2.75, 3.25, 4.0, 5.0]])->save();
+
+    playersPage($user, $club->fresh())
+        ->call('startAdd')
+        ->assertSeeHtml('data-test="star-levels"')
+        ->assertSeeHtml('data-test="star-level-2"')
+        ->assertSee('★2 · Novice')
+        ->assertSee('Learning the rules and basic strokes')
+        ->assertSee('DUPR ~2.00–2.74')
+        ->assertSee('DUPR ~3.25–3.99')
+        ->assertSee('DUPR 5.00+')
+        ->assertSee('DUPR below 2.00');
+});
+
 test('with the DUPR source the picker is hidden and stars are read-only', function () {
     [$user, $club] = memberOf();
 

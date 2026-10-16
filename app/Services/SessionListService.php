@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\ListSource;
+use App\Enums\RatingSource;
 use App\Enums\SessionPlayerStatus;
 use App\Enums\SessionStatus;
 use App\Events\PlaySessionChanged;
@@ -212,8 +213,9 @@ class SessionListService
     }
 
     /**
-     * Set the skill of a listed (or checked-in) player whose skill is still pending: stars 1 to 6,
-     * clears stars_pending. rating_source stays manual.
+     * Set the skill of a listed (or checked-in) manual player, pending or not: stars 1 to 6, always
+     * clears stars_pending. rating_source stays manual. A DUPR-rated player's stars come from the
+     * club's bands, so they are refused (`player` error).
      *
      * @throws ValidationException
      */
@@ -243,8 +245,8 @@ class SessionListService
             if (! $listed) {
                 throw ValidationException::withMessages(['player' => 'That player is not on the list.']);
             }
-            if (! $player->stars_pending) {
-                throw ValidationException::withMessages(['player' => "{$player->name}'s skill is already set."]);
+            if ($player->rating_source !== RatingSource::Manual) {
+                throw ValidationException::withMessages(['player' => "{$player->name}'s stars come from their DUPR rating."]);
             }
 
             $player->forceFill(['stars' => $stars, 'stars_pending' => false])->save();

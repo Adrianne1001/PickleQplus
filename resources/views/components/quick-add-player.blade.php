@@ -6,6 +6,8 @@
     'action' => 'saveQuick',
     'submitLabel' => null,
     'roster' => null,
+    // The club's StarLevels list: the star picker then describes each level.
+    'levels' => null,
 ])
 
 {{-- Quick-add row and inline form. Bound to the host's $quick array and openQuickAdd/closeQuickAdd. --}}
@@ -24,7 +26,7 @@
 
         <flux:field data-test="quick-stars">
             <flux:label>{{ __('Stars (optional)') }}</flux:label>
-            <x-star-picker model="quick.stars" :label="__('Stars')" />
+            <x-star-picker model="quick.stars" :label="__('Stars')" :levels="$levels" />
             <flux:description>
                 {{ __('Leave blank to set the skill later. The player starts at 3 stars until you do.') }}
                 <button type="button" x-cloak x-show="$wire.quick.stars" x-on:click="$wire.quick.stars = ''" class="ms-1 font-semibold text-brand-700 underline underline-offset-2 dark:text-brand-400" data-test="quick-stars-clear">{{ __('Clear stars') }}</button>

@@ -271,7 +271,7 @@ const LOCAL_STATE_ACTIONS = [
     'refreshBoard', 'refreshPanel', 'sessionChanged', 'syncFromSession', 'syncFromBroadcast',
     'cancelEdit', 'cancelVoid', 'showMore', 'cancelModeChange', 'closePanel', 'closeQuickAdd',
     'addGroup', 'removeGroup', 'resetGroups', 'unpick', 'removeNew',
-    'cancelSkill', 'dismissResults', 'back', 'resetImport',
+    'dismissResults', 'back', 'resetImport',
 ];
 
 /** What a guest organizer must NOT be able to do even on their own club: "Class::method". */

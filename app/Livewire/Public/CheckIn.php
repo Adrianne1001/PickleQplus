@@ -2,6 +2,7 @@
 
 namespace App\Livewire\Public;
 
+use App\Domain\Stars\StarLevels;
 use App\Models\Player;
 use App\Models\PlaySession;
 use App\Services\SelfCheckInService;
@@ -18,7 +19,7 @@ use Livewire\Component;
  * The token is re-resolved on every request, so regenerating it or ending the
  * session closes the page at once. Throttles and rules live in SelfCheckInService.
  *
- * @phpstan-type SearchRow array{id: string, name: string, needs_gender: bool, status: string|null}
+ * @phpstan-type SearchRow array{id: string, name: string, needs_gender: bool, stars_pending: bool, status: string|null}
  */
 #[Layout('layouts::public')]
 #[Title('Check in')]
@@ -44,6 +45,13 @@ class CheckIn extends Component
     #[Locked]
     public bool $needsGender = false;
 
+    /** True when the tapped player's skill is not set yet (the UI then offers the star picker). Never their stars. */
+    #[Locked]
+    public bool $starsPending = false;
+
+    /** Optional stars (1 to 6) picked at check-in; 0 means skipped. Only used for a pending player. */
+    public int $stars = 0;
+
     /** The session password, when the session has one. */
     public string $password = '';
 
@@ -67,6 +75,8 @@ class CheckIn extends Component
         $this->selectedId = null;
         $this->gender = '';
         $this->needsGender = false;
+        $this->starsPending = false;
+        $this->stars = 0;
         $this->results = [];
 
         $session = $this->session();
@@ -82,9 +92,11 @@ class CheckIn extends Component
     {
         $this->resetErrorBag();
         $this->gender = '';
+        $this->stars = 0;
         $this->selectedId = collect($this->results)->contains('id', $playerId) ? $playerId : null;
         $row = collect($this->results)->firstWhere('id', $this->selectedId);
         $this->needsGender = $this->selectedId !== null && (bool) ($row['needs_gender'] ?? false);
+        $this->starsPending = $this->selectedId !== null && (bool) ($row['stars_pending'] ?? false);
 
         if ($this->selectedId === null) {
             $this->addError('player', __('Could not find that player. Search for your name again.'));
@@ -97,6 +109,8 @@ class CheckIn extends Component
         $this->password = '';
         $this->gender = '';
         $this->needsGender = false;
+        $this->starsPending = false;
+        $this->stars = 0;
         $this->resetErrorBag();
     }
 
@@ -110,7 +124,7 @@ class CheckIn extends Component
         }
 
         try {
-            $this->finish($checkIns->checkIn($session, $this->token, $this->selectedId, (string) request()->ip(), $this->needsGender && $this->gender !== '' ? $this->gender : null, $this->password === '' ? null : $this->password), $session);
+            $this->finish($checkIns->checkIn($session, $this->token, $this->selectedId, (string) request()->ip(), $this->needsGender && $this->gender !== '' ? $this->gender : null, $this->password === '' ? null : $this->password, $this->starsPending && $this->stars !== 0 ? $this->stars : null), $session);
         } catch (ValidationException $e) {
             $this->setErrorBag($e->validator->errors());
         }
@@ -125,6 +139,8 @@ class CheckIn extends Component
             'session' => $session,
             'selected' => $selected,
             'requiresPassword' => $session !== null && $checkIns->requiresPassword($session),
+            // Level descriptions only; never anybody's current stars (privacy rule).
+            'levels' => $session !== null && $selected !== null && $this->starsPending ? StarLevels::forClub($session->club ?? abort(404)) : [],
             'listEmpty' => $session !== null && ! $checkIns->hasList($session),
             'queueUrl' => $session === null ? null : url('/c/'.($session->club ?? abort(404))->slug.'/s/'.$session->public_id),
         ]);
@@ -138,6 +154,10 @@ class CheckIn extends Component
         $this->done = $result;
         $this->selectedId = null;
         $this->password = '';
+        $this->gender = '';
+        $this->needsGender = false;
+        $this->starsPending = false;
+        $this->stars = 0;
         $this->results = [];
         $this->resetErrorBag();
 

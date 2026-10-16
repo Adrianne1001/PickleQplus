@@ -197,6 +197,72 @@ test('the throttle error is shown for search and for submits', function () {
         ->assertHasErrors('throttle');
 });
 
+test('the page flags a pending-skill player, passes the picked stars on and never holds their stars', function () {
+    $session = checkinSession();
+    $pending = Player::factory()->for($session->club)->manual(3)->create(['name' => 'Penny Pending']);
+    $pending->forceFill(['stars_pending' => true])->save();
+    $set = Player::factory()->for($session->club)->manual(5)->create(['name' => 'Penn Set']);
+    listPlayers($session, $pending, $set);
+
+    Livewire::test(CheckIn::class, ['token' => $session->checkin_token])
+        ->set('search', 'Penn Set')
+        ->call('select', $set->public_id)
+        ->assertSet('starsPending', false)
+        ->set('stars', 2)
+        ->call('confirm')
+        ->assertSet('done.result', 'checked_in');
+    expect($set->fresh()->stars)->toBe(5);
+
+    Livewire::test(CheckIn::class, ['token' => $session->checkin_token])
+        ->set('search', 'Penny')
+        ->call('select', $pending->public_id)
+        ->assertSet('starsPending', true)
+        ->set('stars', 4)
+        ->call('confirm')
+        ->assertSet('done.result', 'checked_in');
+
+    expect($pending->fresh()->stars)->toBe(4)->and($pending->fresh()->stars_pending)->toBeFalse();
+});
+
+test('a pending player who skips the stars keeps the flag', function () {
+    $session = checkinSession();
+    $pending = Player::factory()->for($session->club)->manual(3)->create(['name' => 'Skip Per']);
+    $pending->forceFill(['stars_pending' => true])->save();
+    listPlayers($session, $pending);
+
+    Livewire::test(CheckIn::class, ['token' => $session->checkin_token])
+        ->set('search', 'Skip')
+        ->call('select', $pending->public_id)
+        ->call('confirm')
+        ->assertSet('done.result', 'checked_in');
+
+    expect($pending->fresh()->stars_pending)->toBeTrue()->and($pending->fresh()->stars)->toBe(3);
+});
+
+test('an out-of-range stars value on the page is a stars error', function () {
+    $session = checkinSession();
+    $pending = Player::factory()->for($session->club)->manual(3)->create(['name' => 'Rang Er']);
+    $pending->forceFill(['stars_pending' => true])->save();
+    listPlayers($session, $pending);
+
+    Livewire::test(CheckIn::class, ['token' => $session->checkin_token])
+        ->set('search', 'Rang')
+        ->call('select', $pending->public_id)
+        ->set('stars', 9)
+        ->call('confirm')
+        ->assertHasErrors('stars');
+
+    expect($pending->fresh()->stars_pending)->toBeTrue()->and(SessionPlayer::query()->count())->toBe(0);
+});
+
+test('starsPending is locked', function () {
+    $session = checkinSession();
+    listPlayers($session, Player::factory()->for($session->club)->create());
+
+    expect(fn () => Livewire::test(CheckIn::class, ['token' => $session->checkin_token])->set('starsPending', true))
+        ->toThrow(Exception::class);
+});
+
 test('select ignores ids that are not in the results or in another club', function () {
     $session = checkinSession();
     $mine = Player::factory()->for($session->club)->create(['name' => 'Mine Player']);
@@ -283,4 +349,72 @@ test('without a password the confirm step has no password field and checks in', 
         ->call('confirm')
         ->assertHasNoErrors()
         ->assertSee("You're checked in");
+});
+
+test('the optional skill step with level descriptions is offered only to a pending player', function () {
+    $session = checkinSession();
+    $session->club->forceFill(['star_bands' => [2.0, 2.75, 3.25, 4.0, 5.0]])->save();
+    $pending = Player::factory()->for($session->club)->manual(3)->create(['name' => 'Penny Pending']);
+    $pending->forceFill(['stars_pending' => true])->save();
+    $set = Player::factory()->for($session->club)->manual(5)->create(['name' => 'Penn Set']);
+    listPlayers($session, $pending, $set);
+
+    Livewire::test(CheckIn::class, ['token' => $session->checkin_token])
+        ->set('search', 'Penn Set')
+        ->call('select', $set->public_id)
+        ->assertDontSeeHtml('data-test="checkin-skill"')
+        ->assertDontSeeHtml('data-test="star-3"')
+        ->call('cancelSelect')
+        ->set('search', 'Penny')
+        ->call('select', $pending->public_id)
+        ->assertSeeHtml('data-test="checkin-skill"')
+        ->assertSee('Your skill level (optional)')
+        ->assertSeeHtml('data-test="star-3"')
+        ->assertSeeHtml('data-test="star-level-2"')
+        ->assertSee('DUPR ~2.00–2.74')
+        ->assertSeeHtml('data-test="stars-clear"')
+        ->assertSet('stars', 0)
+        ->set('stars', 2)
+        ->call('confirm')
+        ->assertSet('done.result', 'checked_in');
+
+    expect($pending->fresh()->stars)->toBe(2)->and($pending->fresh()->stars_pending)->toBeFalse();
+});
+
+test('checking in without choosing stars keeps a pending player pending and the page never shows stars', function () {
+    $session = checkinSession();
+    $pending = Player::factory()->for($session->club)->manual(3)->create(['name' => 'Skippy Skip']);
+    $pending->forceFill(['stars_pending' => true])->save();
+    listPlayers($session, $pending);
+
+    Livewire::test(CheckIn::class, ['token' => $session->checkin_token])
+        ->set('search', 'Skippy')
+        ->call('select', $pending->public_id)
+        ->assertSeeHtml('data-test="checkin-skill"')
+        ->assertSet('stars', 0)
+        ->assertDontSeeHtml('data-test="skill-level-current"')
+        ->call('confirm')
+        ->assertHasNoErrors()
+        ->assertSet('done.result', 'checked_in');
+
+    expect($pending->fresh()->stars_pending)->toBeTrue()->and($pending->fresh()->stars)->toBe(3);
+});
+
+test('stars sent as a string, as the browser does, are saved and the picker state resets after check-in', function () {
+    $session = checkinSession();
+    $pending = Player::factory()->for($session->club)->manual(3)->create(['name' => 'Strina String']);
+    $pending->forceFill(['stars_pending' => true])->save();
+    listPlayers($session, $pending);
+
+    Livewire::test(CheckIn::class, ['token' => $session->checkin_token])
+        ->set('search', 'Strina')
+        ->call('select', $pending->public_id)
+        ->set('stars', '4')
+        ->call('confirm')
+        ->assertHasNoErrors()
+        ->assertSet('done.result', 'checked_in')
+        ->assertSet('stars', 0)
+        ->assertSet('starsPending', false);
+
+    expect($pending->fresh()->stars)->toBe(4)->and($pending->fresh()->stars_pending)->toBeFalse();
 });

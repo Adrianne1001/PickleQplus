@@ -3,8 +3,10 @@
 namespace App\Services;
 
 use App\Enums\Gender;
+use App\Enums\RatingSource;
 use App\Enums\SessionPlayerStatus;
 use App\Enums\SessionStatus;
+use App\Events\PlaySessionChanged;
 use App\Models\Player;
 use App\Models\PlaySession;
 use App\Models\SessionListPlayer;
@@ -23,9 +25,11 @@ use Illuminate\Validation\ValidationException;
  *
  * Phase 16: search and check-in cover only the players on the session's list, and an optional
  * session password is checked (inside the lock, with the token) before any player is looked up.
- * Error keys: `session` (closed or stale token), `password`, `player`, `gender`, `throttle`.
+ * Optional stars (1 to 6) are stored only for a still-pending manual player; search rows say only
+ * whether the skill is pending (`stars_pending`), never the player's stars.
+ * Error keys: `session` (closed or stale token), `password`, `player`, `gender`, `stars`, `throttle`.
  *
- * @phpstan-type SearchRow array{id: string, name: string, needs_gender: bool, status: 'waiting'|'playing'|'break'|null}
+ * @phpstan-type SearchRow array{id: string, name: string, needs_gender: bool, stars_pending: bool, status: 'waiting'|'playing'|'break'|null}
  * @phpstan-type CheckInResult array{result: string, player_id: string, public_name: string}
  */
 class SelfCheckInService
@@ -112,6 +116,8 @@ class SelfCheckInService
                 'name' => $p->name,
                 // Only whether the player may still be asked; the gender itself is never exposed.
                 'needs_gender' => $p->gender === null,
+                // Only whether the skill still has to be set; the stars themselves are never exposed.
+                'stars_pending' => $p->stars_pending && $p->rating_source === RatingSource::Manual,
                 'status' => match ($status) {
                     SessionPlayerStatus::Waiting => 'waiting',
                     SessionPlayerStatus::Playing => 'playing',
@@ -128,21 +134,27 @@ class SelfCheckInService
      * Check a listed club player in (or return them from break). The password, when the session
      * has one, is compared inside the session lock (trimmed, case-insensitive); a wrong or missing
      * one is a `password` error and, like every submit, counts toward the submit limit. A gender
-     * is stored only when the player has none (never overwritten). Already being checked in is a
+     * is stored only when the player has none (never overwritten). Optional `$stars` (1 to 6, else a
+     * `stars` error) is stored, inside the lock after the password and list checks, only when the
+     * player is still stars_pending and manual (clearing the flag); otherwise it is ignored
+     * silently. Null skips (the flag stays). Already being checked in is a
      * result, not an error. result: checked_in, returned_from_break or already_checked_in.
      *
      * @return CheckInResult
      *
      * @throws ValidationException
      */
-    public function checkIn(PlaySession $session, string $token, string $playerPublicId, string $ip, ?string $gender = null, ?string $password = null): array
+    public function checkIn(PlaySession $session, string $token, string $playerPublicId, string $ip, ?string $gender = null, ?string $password = null, ?int $stars = null): array
     {
         $this->throttle("selfcheckin:submit:{$ip}:{$session->id}", self::SUBMITS_PER_MINUTE, 60, 'Too many attempts. Please wait a minute and try again.');
 
         $gender = $this->parseGender($gender);
+        if ($stars !== null && ($stars < 1 || $stars > 6)) {
+            throw ValidationException::withMessages(['stars' => 'Choose 1 to 6 stars.']);
+        }
         $this->guardGuestActive($session);
 
-        return DB::transaction(function () use ($session, $token, $playerPublicId, $gender, $password): array {
+        return DB::transaction(function () use ($session, $token, $playerPublicId, $gender, $password, $stars): array {
             $this->lockSession($session);
             $this->assertUsable($session, $token);
 
@@ -192,11 +204,19 @@ class SelfCheckInService
                 $player->forceFill(['gender' => $gender])->save();
             }
 
+            // Same idea for the skill: only a pending manual player takes it, anything else is ignored.
+            $starsSet = $stars !== null && $player->stars_pending && $player->rating_source === RatingSource::Manual;
+            if ($starsSet) {
+                $player->forceFill(['stars' => $stars, 'stars_pending' => false])->save();
+            }
+
             $this->checkIns->checkIn($session, $player, checkExpiry: false);
 
             // checkIn() returns early for a player already in, so refill and notify once here.
             if ($genderSet && $result === 'already_checked_in') {
                 $this->checkIns->setGender($session, $player, $gender);
+            } elseif ($starsSet && $result === 'already_checked_in') {
+                PlaySessionChanged::dispatch($session->id);
             }
 
             return [

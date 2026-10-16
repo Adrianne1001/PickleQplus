@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\RatingSource;
 use App\Enums\SessionPlayerStatus;
 use App\Models\Club;
 use App\Models\Player;
@@ -231,4 +232,121 @@ test('self register is gone from the service', function () {
     expect(method_exists(SelfCheckInService::class, 'register'))->toBeFalse()
         ->and(defined(SelfCheckInService::class.'::REGISTRATIONS_PER_HOUR'))->toBeFalse()
         ->and(defined(SelfCheckInService::class.'::REGISTRATIONS_PER_SESSION'))->toBeFalse();
+});
+
+// --- optional stars at check-in (P16.10) ---
+
+function pendingPlayer(PlaySession $session, string $name = 'Pen Ding'): Player
+{
+    $p = Player::factory()->for($session->club)->manual(3)->create(['name' => $name]);
+    $p->forceFill(['stars_pending' => true])->save();
+    listPlayers($session, $p);
+
+    return $p;
+}
+
+function pubCheckInStars(PlaySession $session, Player $player, ?int $stars, ?string $password = null): array
+{
+    return app(SelfCheckInService::class)->checkIn($session, (string) $session->checkin_token, (string) $player->public_id, '20.0.0.9', null, $password, $stars);
+}
+
+test('stars given for a pending manual player are stored and clear the pending flag', function () {
+    $session = pubSession();
+    $p = pendingPlayer($session);
+
+    $result = pubCheckInStars($session, $p, 5);
+
+    expect($result['result'])->toBe('checked_in')
+        ->and($p->fresh()->stars)->toBe(5)
+        ->and($p->fresh()->stars_pending)->toBeFalse()
+        ->and($p->fresh()->rating_source)->toBe(RatingSource::Manual);
+});
+
+test('stars for a pending player who is already checked in are stored too', function () {
+    $session = pubSession();
+    $p = pendingPlayer($session);
+    pubCheckInStars($session, $p, null);
+    expect($p->fresh()->stars_pending)->toBeTrue();
+
+    $result = pubCheckInStars($session, $p, 2);
+
+    expect($result['result'])->toBe('already_checked_in')
+        ->and($p->fresh()->stars)->toBe(2)->and($p->fresh()->stars_pending)->toBeFalse();
+});
+
+test('stars are ignored silently for a player whose skill is already set', function () {
+    $session = pubSession();
+    $p = Player::factory()->for($session->club)->manual(2)->create();
+    listPlayers($session, $p);
+
+    $result = pubCheckInStars($session, $p, 6);
+
+    expect($result['result'])->toBe('checked_in')
+        ->and($p->fresh()->stars)->toBe(2)->and($p->fresh()->stars_pending)->toBeFalse();
+});
+
+test('stars are ignored silently for a DUPR-rated player', function () {
+    $session = pubSession();
+    $p = Player::factory()->for($session->club)->rated(4.2)->create();
+    listPlayers($session, $p);
+    $before = $p->fresh()->stars;
+
+    pubCheckInStars($session, $p, 1);
+
+    expect($p->fresh()->stars)->toBe($before)->and($p->fresh()->rating_source)->toBe(RatingSource::Dupr);
+});
+
+test('no stars (null) keeps the pending flag', function () {
+    $session = pubSession();
+    $p = pendingPlayer($session);
+
+    pubCheckInStars($session, $p, null);
+
+    expect($p->fresh()->stars)->toBe(3)->and($p->fresh()->stars_pending)->toBeTrue()
+        ->and(SessionPlayer::query()->where('player_id', $p->id)->count())->toBe(1);
+});
+
+test('out-of-range stars are a stars error and nothing is checked in', function (int $stars) {
+    $session = pubSession();
+    $p = pendingPlayer($session);
+
+    expect(pubErrors(fn () => pubCheckInStars($session, $p, $stars)))->toHaveKey('stars')
+        ->and($p->fresh()->stars_pending)->toBeTrue()
+        ->and(SessionPlayer::query()->count())->toBe(0);
+})->with([0, 7, -1]);
+
+test('a wrong password does not set the stars', function () {
+    $session = pubSession('Court7');
+    $p = pendingPlayer($session);
+
+    expect(pubErrors(fn () => pubCheckInStars($session, $p, 5, 'nope')))->toHaveKey('password')
+        ->and($p->fresh()->stars)->toBe(3)->and($p->fresh()->stars_pending)->toBeTrue()
+        ->and(SessionPlayer::query()->count())->toBe(0);
+
+    pubCheckInStars($session, $p, 5, 'court7');
+    expect($p->fresh()->stars)->toBe(5)->and($p->fresh()->stars_pending)->toBeFalse();
+});
+
+test('a stale token does not set the stars', function () {
+    $session = pubSession();
+    $p = pendingPlayer($session);
+
+    $errors = pubErrors(fn () => app(SelfCheckInService::class)->checkIn($session, 'wrong-token', (string) $p->public_id, '20.0.0.9', null, null, 5));
+
+    expect($errors)->toHaveKey('session')->and($p->fresh()->stars_pending)->toBeTrue();
+});
+
+test('search rows say whether the skill is pending but never expose stars', function () {
+    $session = pubSession();
+    pendingPlayer($session, 'Pen Ding');
+    $set = Player::factory()->for($session->club)->manual(4)->create(['name' => 'Pen Set']);
+    $rated = Player::factory()->for($session->club)->rated(4.8)->create(['name' => 'Pen Rated']);
+    listPlayers($session, $set, $rated);
+
+    $rows = collect(app(SelfCheckInService::class)->search($session, (string) $session->checkin_token, 'Pen', '20.0.0.9'))->keyBy('name');
+
+    expect($rows['Pen Ding']['stars_pending'])->toBeTrue()
+        ->and($rows['Pen Set']['stars_pending'])->toBeFalse()
+        ->and($rows['Pen Rated']['stars_pending'])->toBeFalse()
+        ->and($rows->flatMap(fn ($r) => array_keys($r))->unique()->all())->not->toContain('stars');
 });
