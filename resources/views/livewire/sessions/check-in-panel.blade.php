@@ -2,8 +2,8 @@
     $ended = $session->isEnded();
     $counts = $this->counts;
     $levels = $this->levels;
-    // Hover text for the skill stars, read by every row from the list's Alpine data (see x-skill-stars).
-    $levelText = collect($levels)->map(fn (array $level): array => ['label' => __($level['label']), 'detail' => \App\Support\StarLevelText::detail($level)])->values()->all();
+    // Hover text for the skill stars (the level's hint), read by every row from the list's Alpine data (see x-skill-stars).
+    $levelText = collect($levels)->map(fn (array $level): array => ['hover' => __($level['label']).': '.__($level['hint'])])->values()->all();
 @endphp
 
 <div class="space-y-6 pb-20 lg:space-y-8 lg:pb-0" data-test="check-in-panel">
@@ -115,17 +115,19 @@
                 <ul class="divide-y divide-zinc-200 dark:divide-zinc-700" x-data="{ levels: @js($levelText) }" data-test="not-yet-here-list">
                     @foreach ($this->notYetHere as $entry)
                         @php($player = $entry->player)
-                        <li class="flex flex-wrap items-center gap-x-4 gap-y-3 px-5 py-3" wire:key="nyh-{{ $entry->id }}" data-test="not-yet-here-card">
-                            <span class="min-w-0 flex-1 basis-40 break-words font-semibold text-zinc-900 dark:text-white" data-test="not-yet-here-name">{{ $player->name }}</span>
+                        <li class="flex flex-wrap items-center gap-x-4 gap-y-1 px-5 py-2" wire:key="nyh-{{ $entry->id }}" data-test="not-yet-here-card">
+                            <div class="flex min-w-0 flex-1 basis-80 flex-wrap items-center gap-x-3">
+                                <span class="min-w-0 break-words font-semibold text-zinc-900 dark:text-white" data-test="not-yet-here-name">{{ $player->name }}</span>
 
-                            <x-skill-stars
-                                :player-id="$player->id"
-                                :name="$player->name"
-                                :stars="$player->stars"
-                                :pending="(bool) $player->stars_pending"
-                                :editable="$player->rating_source === \App\Enums\RatingSource::Manual"
-                                :levels="$levels"
-                            />
+                                <x-skill-stars
+                                    :player-id="$player->id"
+                                    :name="$player->name"
+                                    :stars="$player->stars"
+                                    :pending="(bool) $player->stars_pending"
+                                    :editable="$player->rating_source === \App\Enums\RatingSource::Manual"
+                                    :levels="$levels"
+                                />
+                            </div>
 
                             <div class="flex flex-wrap items-center gap-2">
                                 <button type="button" wire:click="checkIn({{ $player->id }})" wire:loading.attr="disabled" wire:target="checkIn({{ $player->id }})" class="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-green-700 px-5 text-base font-semibold text-white shadow-xs hover:bg-green-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-green-700 disabled:opacity-60 dark:bg-green-600 dark:hover:bg-green-500 dark:focus-visible:outline-green-400" data-test="check-in-button">
@@ -151,26 +153,25 @@
             </div>
             <ul class="divide-y divide-zinc-200 dark:divide-zinc-700" x-data="{ levels: @js($levelText) }">
                 @forelse ($this->entries as $entry)
-                    <li class="flex flex-wrap items-center gap-x-4 gap-y-3 px-5 py-3" wire:key="entry-{{ $entry->id }}" data-test="checked-in-row">
-                        <div class="flex min-w-0 flex-1 basis-48 flex-wrap items-center gap-x-3 gap-y-1">
+                    <li class="flex flex-wrap items-center gap-x-4 gap-y-1 px-5 py-2" wire:key="entry-{{ $entry->id }}" data-test="checked-in-row">
+                        <div class="flex min-w-0 flex-1 basis-80 flex-wrap items-center gap-x-3 gap-y-1">
                             <span class="break-words font-semibold text-zinc-900 dark:text-white">{{ $entry->player->name }}</span>
                             @if (in_array($entry->player_id, $this->newPlayerIds, true))
                                 <span data-test="new-badge"><flux:badge size="sm" color="purple">{{ __('new') }}</flux:badge></span>
                             @endif
+                            <x-skill-stars
+                                :player-id="$entry->player_id"
+                                :name="$entry->player->name"
+                                :stars="$entry->player->stars"
+                                :pending="(bool) $entry->player->stars_pending"
+                                :editable="! $ended && $entry->player->rating_source === \App\Enums\RatingSource::Manual"
+                                :levels="$levels"
+                            />
                             <flux:badge size="sm" :color="match ($entry->status->value) { 'playing' => 'green', 'break' => 'amber', default => 'zinc' }">
                                 {{ __(ucfirst($entry->status->value)) }}
                             </flux:badge>
                             <span class="text-sm text-zinc-600 dark:text-zinc-400">{{ trans_choice(':count game|:count games', $entry->games_played) }} · <span data-test="player-wins">{{ trans_choice(':count win|:count wins', $wins[$entry->player_id] ?? 0) }}</span></span>
                         </div>
-
-                        <x-skill-stars
-                            :player-id="$entry->player_id"
-                            :name="$entry->player->name"
-                            :stars="$entry->player->stars"
-                            :pending="(bool) $entry->player->stars_pending"
-                            :editable="! $ended && $entry->player->rating_source === \App\Enums\RatingSource::Manual"
-                            :levels="$levels"
-                        />
 
                         @unless ($ended)
                             <div class="flex flex-wrap gap-2">

@@ -45,6 +45,19 @@ final class StarLevelText
     }
 
     /**
+     * One short line for the board: "Intermediate (~3.00–3.49 DUPR)", "Beginner (below 2.50 DUPR)",
+     * "Expert (4.50+ DUPR)".
+     *
+     * @param  StarLevel  $level
+     */
+    public static function short(array $level): string
+    {
+        $open = $level['min'] === null || $level['max'] === null;
+
+        return __($level['label']).' ('.($open ? '' : '~').__(':range DUPR', ['range' => self::range($level)]).')';
+    }
+
+    /**
      * "★3 · Intermediate".
      *
      * @param  StarLevel  $level

@@ -166,7 +166,7 @@ test('a tap on a star saves the skill at once for a pending player, with no Set 
         ->assertDontSeeHtml('data-test="skill-pending"')
         ->assertDontSeeHtml('data-test="skill-placeholder"')
         ->assertSeeHtml('data-test="skill-level-current"')
-        ->assertSee('★5 · Advanced');
+        ->assertSee('Advanced (~4.00–4.49 DUPR)');
 
     expect($pending->fresh()->stars)->toBe(5)->and($pending->fresh()->stars_pending)->toBeFalse();
 });
@@ -178,10 +178,10 @@ test('staff can tap a different star on a manual player who is already set', fun
 
     Livewire::actingAs($owner)->test(CheckInPanel::class, ['session' => $session])
         ->assertSeeHtml('data-test="star-4"')
-        ->assertSee('★2 · Novice')
+        ->assertSee('Novice (~2.50–2.99 DUPR)')
         ->call('setSkill', $set->id, 4)
         ->assertHasNoErrors()
-        ->assertSee('★4 · Upper intermediate');
+        ->assertSee('Upper intermediate (~3.50–3.99 DUPR)');
 
     expect($set->fresh()->stars)->toBe(4);
 });
@@ -208,8 +208,7 @@ test('DUPR-rated players show read-only stars with their level and a tap is refu
         ->assertSeeHtml('data-test="skill-stars"')
         ->assertDontSeeHtml('data-test="star-4"')
         ->assertSeeHtml('data-test="star-static-4"')
-        ->assertSee('★4 · Upper intermediate')
-        ->assertSee('DUPR ~3.50–3.99')
+        ->assertSee('Upper intermediate (~3.50–3.99 DUPR)')
         ->call('setSkill', $rated->id, 2)
         ->assertHasErrors('player')
         ->assertSeeHtml('data-test="check-in-error"');
@@ -225,10 +224,20 @@ test('the level descriptions follow each club own star bands', function () {
     listPlayers($session, $two, $six);
 
     Livewire::actingAs($owner)->test(CheckInPanel::class, ['session' => $session->fresh()])
-        ->assertSee('DUPR ~2.00–2.74')
-        ->assertSee('DUPR 5.00+')
+        ->assertSee('Novice (~2.00–2.74 DUPR)')
+        ->assertSee('Expert (5.00+ DUPR)')
         ->assertSee('2.75')
         ->assertSeeHtml('data-test="skill-level"');
+});
+
+test('the board shows one short level line per player, with open-ended bands worded plainly', function () {
+    [$owner, $club, $session] = uiBoard();
+    $one = Player::factory()->for($club)->manual(1)->create();
+    listPlayers($session, $one);
+
+    Livewire::actingAs($owner)->test(CheckInPanel::class, ['session' => $session])
+        ->assertSee('Beginner (below 2.50 DUPR)')
+        ->assertSeeHtml('data-test="skill-level-current"');
 });
 
 test('the checked-in list has the same direct stars for a pending player', function () {
