@@ -87,7 +87,7 @@ test('actions are denied after membership is removed', function () {
     $club->users()->detach($user->id);
     User::flushRoleCache();
 
-    $component->call('start', $match->id)->assertNotFound();
+    $component->call('start', $match->id, 1)->assertNotFound();
     expect($match->fresh()->status)->toBe(MatchStatus::Staged);
 });
 
@@ -102,29 +102,67 @@ test('the board is only shown on a live session page', function () {
 
 // --- Up Next ---
 
-test('start puts the staged match on the lowest free court and restages', function () {
+test('start puts the staged match on the chosen court and restages', function () {
     [$user, , $session] = liveBoard(8);
     $match = stagedMatch($session);
 
     Livewire::actingAs($user)->test(UpNext::class, ['session' => $session])
-        ->call('start', $match->id)
+        ->call('start', $match->id, 2)
         ->assertHasNoErrors()
         ->assertDispatched('board-changed');
 
     expect($match->fresh()->status)->toBe(MatchStatus::Playing)
-        ->and($match->fresh()->court_no)->toBe(1);
+        ->and($match->fresh()->court_no)->toBe(2);
 });
 
-test('start on a chosen court', function () {
-    [$user, , $session] = liveBoard(4);
+test('the up next card lists the free courts and sends the match to the one tapped', function () {
+    [$user, , $session] = liveBoard(4, ['courts' => 3]);
     $match = stagedMatch($session);
 
-    Livewire::actingAs($user)->test(UpNext::class, ['session' => $session])
-        ->set('courtChoice.0', '3')
-        ->call('start', $match->id)
-        ->assertHasNoErrors();
+    $component = Livewire::actingAs($user)->test(UpNext::class, ['session' => $session])
+        ->assertSee('Up Next 1')
+        ->assertDontSee('Staged #')
+        ->assertSeeHtml('data-test="send-to-court-button"')
+        ->assertSee('Available courts');
+
+    expect(preg_match_all('/data-test="send-to-court-option"\s+data-court="(\d)"/', $component->html(), $m))->toBe(3)
+        ->and($m[1])->toBe(['1', '2', '3']);
+
+    $component->call('start', $match->id, 3)->assertHasNoErrors();
 
     expect($match->fresh()->court_no)->toBe(3);
+});
+
+test('the send to court list only offers free courts', function () {
+    [$user, , $session] = liveBoard(8, ['courts' => 3]);
+    app(MatchService::class)->startMatch($session, stagedMatch($session), 2);
+
+    $html = Livewire::actingAs($user)->test(UpNext::class, ['session' => $session])->html();
+
+    preg_match_all('/data-test="send-to-court-option"\s+data-court="(\d)"/', $html, $m);
+    expect($m[1])->toBe(['1', '3']);
+});
+
+test('start on a busy or unknown court is refused with an inline error', function () {
+    [$user, , $session] = liveBoard(8, ['courts' => 2]);
+    app(MatchService::class)->startMatch($session, stagedMatch($session), 1);
+    $next = stagedMatch($session);
+
+    $component = Livewire::actingAs($user)->test(UpNext::class, ['session' => $session]);
+    $component->call('start', $next->id, 1)->assertHasErrors('court')->assertSee('That court is in use');
+    $component->call('start', $next->id, 9)->assertHasErrors('court');
+
+    expect($next->fresh()->status)->toBe(MatchStatus::Staged);
+});
+
+test('a user who cannot manage the session cannot open the up next panel', function () {
+    [, , $session] = liveBoard(4);
+    $match = stagedMatch($session);
+
+    Livewire::actingAs(User::factory()->create())->test(UpNext::class, ['session' => $session])
+        ->assertNotFound();
+
+    expect($match->fresh()->status)->toBe(MatchStatus::Staged);
 });
 
 test('start with no free court shows the error inline and disables the button', function () {
@@ -134,9 +172,10 @@ test('start with no free court shows the error inline and disables the button', 
 
     Livewire::actingAs($user)->test(UpNext::class, ['session' => $session])
         ->assertSee('No free court')
-        ->call('start', $next->id)
+        ->assertDontSeeHtml('data-test="send-to-court-option"')
+        ->call('start', $next->id, 1)
         ->assertHasErrors('court')
-        ->assertSee('No court is free');
+        ->assertSee('That court is in use');
 
     expect($next->fresh()->status)->toBe(MatchStatus::Staged);
 });
@@ -256,8 +295,8 @@ test('stale and foreign match ids give an inline error, not a 404', function () 
     $foreign = GameMatch::factory()->create();
 
     $component = Livewire::actingAs($user)->test(UpNext::class, ['session' => $session]);
-    $component->call('start', 999999)->assertHasErrors('match');
-    $component->call('start', $foreign->id)->assertHasErrors('match');
+    $component->call('start', 999999, 1)->assertHasErrors('match');
+    $component->call('start', $foreign->id, 1)->assertHasErrors('match');
 
     expect($foreign->fresh()->status)->toBe(MatchStatus::Staged);
 });

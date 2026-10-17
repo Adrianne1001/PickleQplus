@@ -11,6 +11,7 @@ use App\Enums\Team;
 use App\Models\GameMatch;
 use App\Models\PlaySession;
 use App\Models\SessionPlayer;
+use App\Services\Rotation\RotationStrategies;
 use App\Services\Rotation\SkillCourtsStrategy;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Carbon;
@@ -24,7 +25,8 @@ use Illuminate\Support\Facades\DB;
  * @phpstan-type PlayerRow array{id: int, name: string, stars: int|null, gender: string|null}
  * @phpstan-type MatchRow array{id: int, court: int|null, status: string, teams: array{A: list<PlayerRow>, B: list<PlayerRow>}, player_ids: list<int>, group: int|null, elapsed_minutes: int|null, score_a: int|null, score_b: int|null, finished_at: CarbonInterface|null, exported: bool}
  * @phpstan-type RecentRow array{id: int, court: int|null, status: string, teams: array{A: list<PlayerRow>, B: list<PlayerRow>}, player_ids: list<int>, group: int|null, elapsed_minutes: int|null, score_a: int|null, score_b: int|null, finished_at: CarbonInterface|null, exported: bool, number: int, winner: 'A'|'B'|null, duration_minutes: int|null}
- * @phpstan-type CourtRow array{court: int, match: MatchRow|null}
+ * @phpstan-type StagedRow array{id: int, court: int|null, status: string, teams: array{A: list<PlayerRow>, B: list<PlayerRow>}, player_ids: list<int>, group: int|null, elapsed_minutes: int|null, score_a: int|null, score_b: int|null, finished_at: CarbonInterface|null, exported: bool, number: int, free_courts: list<int>}
+ * @phpstan-type CourtRow array{court: int, match: MatchRow|null, up_next: list<StagedRow>}
  * @phpstan-type QueueRow array{id: int, name: string, stars: int|null, games_played: int, wins: int, waited_minutes: int, estimate_minutes: int|null, gender: string|null, needs_gender: bool, group: int|null, group_position: int|null}
  * @phpstan-type GroupRow array{index: int, label: string, min_stars: int, max_stars: int, courts: list<int>, waiting: int, staged: int}
  */
@@ -37,11 +39,13 @@ class SessionBoard
     public function __construct(private readonly WaitEstimator $estimator) {}
 
     /**
-     * Every court 1..courts with its playing match, if any.
+     * Every court 1..courts with its playing match, if any. A free court also carries
+     * `up_next`: the staged matches that may start on it, in Up Next order (the first is
+     * the court's own Up Next). Pass $withUpNext false to skip that lookup (one query).
      *
      * @return list<CourtRow>
      */
-    public function courts(PlaySession $session): array
+    public function courts(PlaySession $session, bool $withUpNext = true): array
     {
         $playing = [];
         foreach ($this->matches($session, MatchStatus::Playing) as $match) {
@@ -50,9 +54,24 @@ class SessionBoard
             }
         }
 
+        $free = [];
+        for ($court = 1; $court <= $session->courts; $court++) {
+            if (! isset($playing[$court])) {
+                $free[] = $court;
+            }
+        }
+
+        $staged = $withUpNext && $free !== [] ? $this->stagedRows($session, $free) : [];
+
         $courts = [];
         for ($court = 1; $court <= $session->courts; $court++) {
-            $courts[] = ['court' => $court, 'match' => $playing[$court] ?? null];
+            $courts[] = [
+                'court' => $court,
+                'match' => $playing[$court] ?? null,
+                'up_next' => isset($playing[$court])
+                    ? []
+                    : array_values(array_filter($staged, static fn (array $row): bool => in_array($court, $row['free_courts'], true))),
+            ];
         }
 
         return $courts;
@@ -83,13 +102,16 @@ class SessionBoard
     }
 
     /**
-     * Staged (Up Next) matches, oldest first.
+     * Staged (Up Next) matches, oldest first. Each row carries its Up Next number (its
+     * position among the staged matches of its section: the whole list, or its group in
+     * skill courts) and `free_courts`, the free courts it may start on, lowest first.
+     * Pass $withCourts false to skip that lookup (then `free_courts` is always empty).
      *
-     * @return list<MatchRow>
+     * @return list<StagedRow>
      */
-    public function staged(PlaySession $session): array
+    public function staged(PlaySession $session, bool $withCourts = true): array
     {
-        return array_map($this->matchRow(...), $this->matches($session, MatchStatus::Staged));
+        return $this->stagedRows($session, $withCourts ? $this->freeCourts($session) : [], $withCourts);
     }
 
     /**
@@ -395,6 +417,39 @@ class SessionBoard
         }
 
         return $wins;
+    }
+
+    /**
+     * @param  list<int>  $free  court numbers with no playing match
+     * @return list<StagedRow>
+     */
+    private function stagedRows(PlaySession $session, array $free, bool $withCourts = true): array
+    {
+        $matches = $this->matches($session, MatchStatus::Staged);
+        $skill = SkillCourtsStrategy::groupsFor($session) !== null;
+
+        $strategy = null; // also the case for a mode with no strategy yet: nothing can be offered a court
+        if ($withCourts) {
+            try {
+                $strategy = RotationStrategies::for($session);
+            } catch (\LogicException) {
+                $strategy = null;
+            }
+        }
+
+        $counters = [];
+        $rows = [];
+        foreach ($matches as $match) {
+            $section = $skill ? ($match->court_group ?? 0) : 0;
+            $counters[$section] = ($counters[$section] ?? 0) + 1;
+            $allowed = $strategy === null ? [] : $strategy->allowedCourts($session, $match);
+            $courts = array_values(array_intersect($free, $allowed));
+            sort($courts);
+
+            $rows[] = $this->matchRow($match) + ['number' => $counters[$section], 'free_courts' => $courts];
+        }
+
+        return $rows;
     }
 
     /**

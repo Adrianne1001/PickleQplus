@@ -25,7 +25,7 @@
 
     <div class="grid gap-4 lg:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
         @foreach ($courts as $row)
-            @php($match = $row['match'])
+            @php $match = $row['match']; @endphp
             <div @class([
                 'overflow-hidden rounded-2xl border bg-white shadow-xs dark:bg-zinc-900',
                 'border-brand-600/50 ring-1 ring-brand-600/20 dark:border-brand-500/50' => $match,
@@ -80,6 +80,55 @@
                         @endif
 
                         @include('livewire.sessions.partials.match-panel', ['match' => $match, 'candidates' => $this->candidates])
+                    @elseif ($live && $row['up_next'] !== [])
+                        @php
+                            $first = $row['up_next'][0];
+                            $modal = 'choose-matchup-'.$row['court'];
+                        @endphp
+                        <div class="rounded-xl bg-amber-50 p-3 ring-1 ring-amber-200 ring-inset dark:bg-amber-950/40 dark:ring-amber-800/60" data-test="court-up-next" data-match="{{ $first['id'] }}">
+                            <div class="mb-1.5 text-xs font-bold uppercase tracking-wider text-amber-800 dark:text-amber-300">{{ __('Up Next :n', ['n' => $first['number']]) }}</div>
+                            <div class="grid gap-1 text-base font-semibold text-zinc-900 sm:grid-cols-[1fr_auto_1fr] sm:items-center sm:gap-3 dark:text-white">
+                                <span>{{ collect($first['teams']['A'])->pluck('name')->join(' & ') }}</span>
+                                <span class="text-xs font-medium uppercase text-zinc-600 dark:text-zinc-400">{{ __('vs') }}</span>
+                                <span>{{ collect($first['teams']['B'])->pluck('name')->join(' & ') }}</span>
+                            </div>
+                        </div>
+
+                        <div class="mt-4 space-y-2">
+                            <flux:button variant="primary" icon="play" class="min-h-14 w-full text-base" wire:click="startOnCourt({{ $row['court'] }}, {{ $first['id'] }})" data-test="court-start-up-next">{{ __('Start Up Next :n', ['n' => $first['number']]) }}</flux:button>
+                            <flux:modal.trigger :name="$modal">
+                                <flux:button class="min-h-12 w-full" icon="user-group" data-test="choose-players-button">{{ __('Choose players') }}</flux:button>
+                            </flux:modal.trigger>
+                        </div>
+
+                        <flux:modal :name="$modal" class="w-full max-w-lg" data-test="choose-matchup-modal" data-court="{{ $row['court'] }}">
+                            <div class="space-y-4">
+                                <flux:heading size="lg">{{ __('Choose a matchup for Court :n', ['n' => $row['court']]) }}</flux:heading>
+
+                                <div class="max-h-[60vh] space-y-3 overflow-y-auto pr-1">
+                                    @foreach ($row['up_next'] as $option)
+                                        <div class="overflow-hidden rounded-2xl border border-amber-300 bg-white dark:border-amber-700/60 dark:bg-zinc-900" wire:key="court-{{ $row['court'] }}-option-{{ $option['id'] }}" data-test="choose-matchup-option" data-match="{{ $option['id'] }}">
+                                            <div class="bg-amber-50 px-4 py-2 text-xs font-bold uppercase tracking-wider text-amber-800 dark:bg-amber-950/50 dark:text-amber-300">{{ __('Up Next :n', ['n' => $option['number']]) }}</div>
+                                            <div class="space-y-3 p-4">
+                                                <x-match-teams :match="$option" :mixed="$mixed" />
+                                                <flux:button variant="primary" icon="play" class="min-h-14 w-full text-base" wire:click="startOnCourt({{ $row['court'] }}, {{ $option['id'] }})" data-test="choose-matchup-start">{{ __('Start Up Next :n', ['n' => $option['number']]) }}</flux:button>
+                                            </div>
+                                        </div>
+                                    @endforeach
+                                </div>
+
+                                <div class="flex justify-end">
+                                    <flux:modal.close>
+                                        <flux:button variant="ghost" class="min-h-12" data-test="choose-matchup-cancel">{{ __('Cancel') }}</flux:button>
+                                    </flux:modal.close>
+                                </div>
+                            </div>
+                        </flux:modal>
+                    @elseif ($live)
+                        <div class="flex items-center gap-3 py-4 text-zinc-600 dark:text-zinc-400">
+                            <flux:icon.sparkles class="size-6 shrink-0" />
+                            <flux:text data-test="court-no-up-next">{{ __('No one up next for this court') }}</flux:text>
+                        </div>
                     @else
                         <div class="flex items-center gap-3 py-4 text-zinc-600 dark:text-zinc-400">
                             <flux:icon.sparkles class="size-6 shrink-0" />

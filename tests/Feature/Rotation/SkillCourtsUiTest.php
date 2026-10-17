@@ -205,8 +205,8 @@ test('court cards show their group and the start picker lists only free courts o
     // Group 1 has court 2 free only; group 2 offers courts 3 and 4.
     $sections = preg_split('/data-test="up-next-group"/', $html);
     expect($sections)->toHaveCount(3);
-    expect($sections[1])->toContain('value="2"')->not->toContain('value="1"')->not->toContain('value="3"');
-    expect($sections[2])->toContain('value="3"')->toContain('value="4"')->not->toContain('value="2"');
+    expect($sections[1])->toContain('data-court="2"')->not->toContain('data-court="1"')->not->toContain('data-court="3"');
+    expect($sections[2])->toContain('data-court="3"')->toContain('data-court="4"')->not->toContain('data-court="2"');
 });
 
 test('a court error from the service shows in the board callout', function () {
@@ -216,8 +216,7 @@ test('a court error from the service shows in the board callout', function () {
     $matches = uiSkillMatches($session, MatchStatus::Staged);
 
     Livewire::actingAs($owner)->test(UpNext::class, ['session' => $session])
-        ->set("courtChoice.{$matches[0]->id}", '4')
-        ->call('start', $matches[0]->id)
+        ->call('start', $matches[0]->id, 4)
         ->assertHasErrors('court')
         ->assertSee("That court is not in this match's skill group.");
 });
@@ -290,35 +289,33 @@ test('two groups each pick a court and start independently', function () {
     [$top, $bottom] = uiSkillMatches($session, MatchStatus::Staged);
 
     $component = Livewire::actingAs($owner)->test(UpNext::class, ['session' => $session])
-        ->set("courtChoice.{$top->id}", '2')
-        ->set("courtChoice.{$bottom->id}", '4')
-        ->call('start', $bottom->id)
+        ->call('start', $bottom->id, 4)
         ->assertHasNoErrors();
 
     expect($bottom->fresh()->court_no)->toBe(4)->and($top->fresh()->status)->toBe(MatchStatus::Staged);
 
-    $component->set("courtChoice.{$top->id}", '2')->call('start', $top->id)->assertHasNoErrors();
+    $component->call('start', $top->id, 2)->assertHasNoErrors();
 
     expect($top->fresh()->court_no)->toBe(2);
 });
 
-test('a court picked for one match is not used for another and a bad shape is rejected', function () {
-    $session = uiSkillBoard();
+test('each group numbers its own Up Next and a match is refused a court outside its group', function () {
+    $session = uiSkillBoard(['up_next_count' => 2]);
     $owner = uiSkillOwner($session);
-    uiSkillJoin($session, [5, 5, 5, 5, 2, 2, 2, 2]);
-    [$top, $bottom] = uiSkillMatches($session, MatchStatus::Staged);
+    uiSkillJoin($session, [5, 5, 5, 5, 5, 5, 5, 5, 2, 2, 2, 2]);
+    [, , $bottom] = uiSkillMatches($session, MatchStatus::Staged);
 
-    Livewire::actingAs($owner)->test(UpNext::class, ['session' => $session])
-        ->set("courtChoice.{$top->id}", '2')
-        ->call('start', $bottom->id)
-        ->assertHasNoErrors();
+    $component = Livewire::actingAs($owner)->test(UpNext::class, ['session' => $session]);
+    $sections = preg_split('/data-test="up-next-group"/', $component->html());
 
-    expect($bottom->fresh()->court_no)->toBe(3);
+    expect(substr_count($sections[1], 'Up Next 1'))->toBe(1)
+        ->and(substr_count($sections[1], 'Up Next 2'))->toBe(1)
+        ->and(substr_count($sections[2], 'Up Next 1'))->toBe(1)
+        ->and($sections[2])->not->toContain('Up Next 2');
 
-    Livewire::actingAs($owner)->test(UpNext::class, ['session' => $session])
-        ->set('courtChoice', ['x' => '1'])
-        ->call('start', $top->id)
-        ->assertHasErrors('court');
+    $component->call('start', $bottom->id, 2)->assertHasErrors('court');
+
+    expect($bottom->fresh()->status)->toBe(MatchStatus::Staged);
 });
 
 test('the queue me-card position uses the group position in skill courts', function () {

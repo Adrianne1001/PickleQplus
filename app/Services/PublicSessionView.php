@@ -82,7 +82,7 @@ class PublicSessionView
         };
 
         $courts = [];
-        foreach ($this->board->courts($session) as $c) {
+        foreach ($this->board->courts($session, false) as $c) {
             $courts[] = ['court' => $c['court'], 'match' => $c['match'] === null ? null : $match($c['match'])];
         }
 
@@ -128,7 +128,7 @@ class PublicSessionView
             'mode' => $mode,
             'courts' => $courts,
             'groups' => $groups,
-            'up_next' => array_map($match, $this->board->staged($session)),
+            'up_next' => array_map($match, $this->board->staged($session, false)),
             'waiting' => $waiting,
             'on_break' => $onBreak,
             'players' => $players,

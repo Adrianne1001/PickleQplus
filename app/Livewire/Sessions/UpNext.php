@@ -14,7 +14,7 @@ use Livewire\Attributes\On;
 use Livewire\Component;
 
 /**
- * Staged matches: start on a court, re-roll, swap, remove and void, plus the
+ * Staged matches: send to a court, re-roll, swap, remove and void, plus the
  * auto-fill toggle and the Up Next count.
  */
 class UpNext extends Component
@@ -25,14 +25,6 @@ class UpNext extends Component
     public bool $autoFill = false;
 
     public string $upNextCount = '1';
-
-    /**
-     * Chosen court for Start, keyed by staged match id (0 is the single picker of the
-     * other modes). Empty means the lowest free court.
-     *
-     * @var array<array-key, mixed>
-     */
-    public array $courtChoice = [];
 
     protected function bootBoard(): void
     {
@@ -69,30 +61,20 @@ class UpNext extends Component
         ]);
     }
 
-    public function start(MatchService $matches, int $matchId): void
+    /** Start a staged match on the court chosen from its "Send to court" list. */
+    public function start(MatchService $matches, int $matchId, int $court): void
     {
         $this->authorizeManage();
 
-        $court = $this->chosenCourt($matchId);
-        $matches->startMatch($this->session, $this->matchOrFail($matchId), $court);
+        try {
+            $matches->startMatch($this->session, $this->matchOrFail($matchId), $court);
+        } catch (ValidationException $e) {
+            $this->dispatch('board-changed'); // the tap was stale: refresh the whole board
 
-        $this->courtChoice = [];
-        $this->changed();
-    }
-
-    /** The court picked for this match only; the shape of the whole property is validated first. */
-    private function chosenCourt(int $matchId): ?int
-    {
-        foreach ($this->courtChoice as $key => $value) {
-            if (! is_int($key) || ! (is_string($value) || is_int($value)) || ! ctype_digit((string) $value) && (string) $value !== '') {
-                throw ValidationException::withMessages(['court' => __('Pick a valid court.')]);
-            }
+            throw $e;
         }
 
-        $key = app(SessionBoard::class)->mode($this->session) === 'skill_courts' ? $matchId : 0;
-        $value = (string) ($this->courtChoice[$key] ?? '');
-
-        return ctype_digit($value) ? (int) $value : null;
+        $this->changed();
     }
 
     public function reroll(MatchService $matches, int $matchId): void
@@ -124,9 +106,9 @@ class UpNext extends Component
         $board = app(SessionBoard::class);
 
         return view('livewire.sessions.up-next', [
-            'staged' => $board->staged($this->session),
-            'freeCourts' => $board->freeCourts($this->session),
+            'staged' => $board->staged($this->session, $this->session->isLive()),
             'mixed' => $board->mode($this->session) === 'mixed',
+            'live' => $this->session->isLive(),
             'groups' => $board->groups($this->session),
         ]);
     }

@@ -318,6 +318,16 @@ Phase 16 additions (P16.1): `session_list_players` (play_session_id, player_id, 
 - **Who:** owners and staff (session `manage`, player `create`) and guest organizers (the P14 `Gate::before` whitelist). The club comes from the route, never the request.
 - **No new packages.** Reclub fetching uses Laravel's `Http` client.
 
+**Phase 17 rules: choose the court for Up Next (decided 2026-10-16, user request with screenshots; change here first if needed):**
+- **Goal (user request):** staff decide which court an Up Next match goes to. They can do it from the Up Next card ("Send to court") or from an empty court ("Start Up Next 1" or "Choose players").
+- **Naming:** staged matches are labelled **"Up Next N"** on the board, numbered in Up Next order within their section (per group in skill courts). This replaces "Staged #N". The same N is used on the court buttons.
+- **Up Next card:** a **"Send to court"** button opens a small list of **available courts**: free courts this match may start on (`RotationStrategy::allowedCourts`, so skill groups and court-bound modes are respected), lowest first. Tapping a court starts the match there. With no such court, the button is disabled ("No free court"). This replaces the board's "Start on court" select and the per-match "Start" button.
+- **Free court card:** while the session is live, a free court shows the **first Up Next match that may start on it** (its two teams, small) and a primary **"Start Up Next N"** button that starts that match on this court. A secondary **"Choose players"** button opens a modal, **"Choose a matchup for Court X"**, listing every Up Next match that may start on this court as cards (teams and a "Start Up Next N" button each), with Cancel. With no Up Next match for that court, the card says so and shows neither button. Draft and ended sessions show no buttons.
+- **Server side:** every start goes through `MatchService::startMatch($session, $match, $courtNo)`, which already re-checks status, players, group and a free court under the session lock. A stale tap (the match or court was taken on another device) shows the normal board error and the board refreshes. Owners and staff (session `manage`) and guest organizers only. The court and match come from the component, scoped to the session; never trust ids beyond that.
+- **Unchanged:** auto-fill still starts the oldest staged match on every free court at once, so these buttons matter mainly with auto-fill off. Re-roll, swap, remove and void stay on the Up Next card.
+- **Not in this phase (from the reference screenshots, not requested):** "Choose manually" (building a match from hand-picked waiting players), the "Matchup heads-up" repeat warning, the "Auto" badge and per-card "Rebuild". Add them as items only if the user asks.
+- **No new packages.**
+
 ---
 
 ## 3. Balanced rotation engine
@@ -602,6 +612,12 @@ Rules: "wins" means this session's wins only, counted as in the Phase 5 rules (`
 - [x] **P16.11** UI skill stars: star picker hover/selection descriptions with band-based DUPR ranges; board Not Yet Here and checked-in list with large tap-to-set stars right of the name ("Set skill" as a placeholder, no link or Save step); optional star step on public check-in for pending players. Livewire tests, phone, light and dark.
 - [x] **P16.12** Compact board stars (user feedback 2026-10-16, screenshot): small stars right after the name with a one-line "Level (~range DUPR)" label, hint on hover only, single-line rows on desktop, still tap-to-save. Same on the checked-in list.
 - [ ] **P16.7** Manual browser check: paste a group-chat list with numbering and details, a real Reclub link, check in all with one player in another live session, tap-to-set stars on the board (hover descriptions, custom club bands), public check-in (including the optional star step) with and without a password on a phone, and a player not on the list.
+
+### Phase 17 — Choose the court for Up Next *(branch `feature/p17-court-picker`; added 2026-10-16, user request; see Phase 17 rules)*
+- [x] **P17.1** Board data: `SessionBoard` staged rows carry their Up Next number and the free courts they may start on; free court rows carry the Up Next matches that may start there (first one = the court's "Up Next"). Unit tests across balanced, skill courts and a court-bound mode.
+- [x] **P17.2** Up Next card: "Up Next N" labels, "Send to court" with an available-courts list (disabled with "No free court"), replacing the "Start on court" select and the "Start" button. Livewire tests (starts on the chosen court, a court outside the match's group refused, stale court error), phone, light and dark.
+- [x] **P17.3** Free court card: Up Next preview, "Start Up Next N", and the "Choose players" modal ("Choose a matchup for Court X", one card per eligible Up Next match, Cancel). Livewire tests (starts on that court, only eligible matches listed, no buttons without an Up Next match or outside live, unauthorized user refused), phone, light and dark.
+- [ ] **P17.4** Manual browser check with auto-fill off: two free courts, send Up Next 2 to Court 2 from the card, start from an empty court, choose a matchup in the modal, skill courts, a stale tap from a second device, the "Send to court" list and the "Choose players" modal kept open across a 10-second poll (and while another device takes that court), phone, light and dark. *(Poll check added at the P17 review.)*
 
 ---
 
