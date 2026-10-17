@@ -1,7 +1,7 @@
 <?php
 
 use App\Enums\MatchStatus;
-use App\Enums\SessionPlayerStatus;
+use App\Enums\Team;
 use App\Livewire\Sessions\Courts;
 use App\Livewire\Sessions\Results;
 use App\Livewire\Sessions\UpNext;
@@ -233,35 +233,28 @@ test('swap without choosing players shows an inline error', function () {
         ->assertHasErrors('player');
 });
 
-test('remove fills the slot from the waiting list', function () {
+test('the Remove action is gone from the Up Next and court cards', function () {
     [$user, , $session] = liveBoard(5);
     $match = stagedMatch($session);
-    $out = $match->matchPlayers()->firstOrFail()->player_id;
 
+    expect(method_exists(UpNext::class, 'remove'))->toBeFalse()
+        ->and(method_exists(Courts::class, 'remove'))->toBeFalse();
     Livewire::actingAs($user)->test(UpNext::class, ['session' => $session])
+        ->assertDontSeeHtml('data-test="remove-button"')
         ->call('openPanel', 'remove', $match->id)
-        ->set('outPlayerId', (string) $out)
-        ->set('removeStatus', 'break')
-        ->call('remove')
-        ->assertHasNoErrors();
-
-    expect(SessionPlayer::where('player_id', $out)->value('status'))->toBe(SessionPlayerStatus::Break)
-        ->and($match->matchPlayers()->pluck('player_id')->all())->not->toContain($out);
+        ->assertSet('panel', null);
 });
 
-test('remove with nobody waiting shows an inline error and changes nothing', function () {
-    [$user, , $session] = liveBoard(4);
-    $match = stagedMatch($session);
-    $out = $match->matchPlayers()->firstOrFail()->player_id;
+test('swap lists the free waiting players, then the other Up Next players', function () {
+    [$user, , $session] = liveBoard(9, ['up_next_count' => 2]);
+    $first = stagedMatch($session);
 
-    Livewire::actingAs($user)->test(UpNext::class, ['session' => $session])
-        ->call('openPanel', 'remove', $match->id)
-        ->set('outPlayerId', (string) $out)
-        ->call('remove')
-        ->assertHasErrors()
-        ->assertSeeHtml('data-test="board-error"');
+    $component = Livewire::actingAs($user)->test(UpNext::class, ['session' => $session])
+        ->call('openPanel', 'swap', $first->id);
+    $candidates = $component->get('candidates');
 
-    expect($match->matchPlayers()->pluck('player_id')->all())->toContain($out);
+    expect(collect($candidates)->pluck('source')->unique()->values()->all())->toBe(['waiting', 'up_next'])
+        ->and(collect($candidates)->where('source', 'up_next')->pluck('up_next_number')->unique()->all())->toBe([2]);
 });
 
 test('auto-fill and the Up Next count are saved through the service', function () {
@@ -319,8 +312,8 @@ test('finishing a match records the score and frees the court', function () {
     $match = startFirst($session);
 
     Livewire::actingAs($user)->test(Courts::class, ['session' => $session])
-        ->call('openPanel', 'score', $match->id)
-        ->set('scoreA', '11')
+        ->call('declareWinner', 'A', $match->id)
+        ->assertSet('scoreA', '11')
         ->set('scoreB', '7')
         ->call('finish')
         ->assertHasNoErrors()
@@ -337,19 +330,18 @@ test('an invalid score is shown inline and nothing changes', function () {
     $match = startFirst($session);
 
     $component = Livewire::actingAs($user)->test(Courts::class, ['session' => $session])
-        ->call('openPanel', 'score', $match->id)
-        ->set('scoreA', '11')
+        ->call('declareWinner', 'A', $match->id)
         ->set('scoreB', '10')
         ->assertSee('must lead by at least 2')
         ->call('finish')
         ->assertHasErrors('score')
         ->assertSeeHtml('data-test="board-error"');
 
-    $component->set('scoreA', '')->call('finish')->assertHasErrors('scoreA');
+    $component->set('scoreB', '')->call('finish')->assertHasErrors('scoreB');
     expect($match->fresh()->status)->toBe(MatchStatus::Playing);
 });
 
-test('swap, remove and void a playing match', function () {
+test('swap and void a playing match', function () {
     [$user, , $session] = liveBoard(5);
     $match = startFirst($session);
     $ids = $match->matchPlayers()->pluck('player_id')->all();
@@ -368,26 +360,12 @@ test('swap, remove and void a playing match', function () {
     expect($match->fresh()->status)->toBe(MatchStatus::Void);
 });
 
-test('removing a player from a playing match with nobody waiting is an inline error', function () {
-    [$user, , $session] = liveBoard(4);
-    $match = startFirst($session);
-    $out = $match->matchPlayers()->firstOrFail()->player_id;
-
-    Livewire::actingAs($user)->test(Courts::class, ['session' => $session])
-        ->call('openPanel', 'remove', $match->id)
-        ->set('outPlayerId', (string) $out)
-        ->call('remove')
-        ->assertHasErrors();
-
-    expect($match->matchPlayers()->pluck('player_id')->all())->toContain($out);
-});
-
 // --- Results ---
 
 test('undo last reverts the most recent result and only it offers the button', function () {
     [$user, , $session] = liveBoard(4);
     $match = startFirst($session);
-    app(MatchService::class)->finish($session->fresh(), $match, 11, 5);
+    app(MatchService::class)->finish($session->fresh(), $match, Team::A, 11, 5);
 
     Livewire::actingAs($user)->test(Results::class, ['session' => $session])
         ->assertSeeInOrder(['11', '-', '5'])
@@ -398,21 +376,22 @@ test('undo last reverts the most recent result and only it offers the button', f
     expect($match->fresh()->status)->toBe(MatchStatus::Playing);
 });
 
-test('edit score updates a finished match and shows validation errors', function () {
+test('edit result updates a finished match and shows validation errors', function () {
     [$user, , $session] = liveBoard(4);
     $match = startFirst($session);
-    app(MatchService::class)->finish($session->fresh(), $match, 11, 5);
+    app(MatchService::class)->finish($session->fresh(), $match, Team::A, 11, 5);
 
     Livewire::actingAs($user)->test(Results::class, ['session' => $session])
         ->call('edit', $match->id)
         ->assertSet('scoreA', '11')
         ->set('scoreA', '11')
         ->set('scoreB', '10')
-        ->call('saveScore')
+        ->call('saveResult')
         ->assertHasErrors('score')
+        ->set('editWinner', 'B')
         ->set('scoreA', '9')
         ->set('scoreB', '11')
-        ->call('saveScore')
+        ->call('saveResult')
         ->assertHasNoErrors()
         ->assertSet('editingId', null);
 
@@ -474,7 +453,7 @@ test('the average match duration uses the last 10 done matches, else the config 
 
     $match = startFirst($session);
     $match->forceFill(['started_at' => now()->subMinutes(20)])->save();
-    app(MatchService::class)->finish($session->fresh(), $match->fresh(), 11, 3);
+    app(MatchService::class)->finish($session->fresh(), $match->fresh(), Team::A, 11, 3);
 
     expect(round($board->averageMatchMinutes($session), 1))->toBe(20.0);
 });
@@ -517,7 +496,7 @@ test('two devices changing different Up Next settings both survive', function ()
 test('a finished match can be voided from the results after confirming', function () {
     [$user, , $session] = liveBoard(4);
     $match = startFirst($session);
-    app(MatchService::class)->finish($session->fresh(), $match, 11, 5);
+    app(MatchService::class)->finish($session->fresh(), $match, Team::A, 11, 5);
 
     Livewire::actingAs($user)->test(Results::class, ['session' => $session])
         ->call('confirmVoid', $match->id)
@@ -534,11 +513,11 @@ test('a finished match can be voided from the results after confirming', functio
 test('the void button is hidden for a DUPR-exported match', function () {
     [$user, , $session] = liveBoard(4);
     $match = startFirst($session);
-    app(MatchService::class)->finish($session->fresh(), $match, 11, 5);
+    app(MatchService::class)->finish($session->fresh(), $match, Team::A, 11, 5);
     $match->forceFill(['dupr_exported_at' => now()])->save();
 
     Livewire::actingAs($user)->test(Results::class, ['session' => $session])
-        ->assertSeeHtml('data-test="edit-score-button"')
+        ->assertSeeHtml('data-test="edit-result-button"')
         ->assertDontSeeHtml('data-test="void-result-button"')
         ->call('confirmVoid', $match->id)
         ->call('voidMatch')
@@ -558,6 +537,7 @@ test('only the last 10 done matches count towards the average duration', functio
             'court_no' => 1,
             'team_a_score' => 11,
             'team_b_score' => 5,
+            'winner' => Team::A,
             // The 2 oldest take 60 minutes, the newest 10 take 10 minutes.
             'started_at' => $finished->copy()->subMinutes($i <= 2 ? 60 : 10),
             'finished_at' => $finished,
@@ -591,6 +571,7 @@ function doneMatch(PlaySession $session, int $minutesAgo, ?int $a, ?int $b, ?int
         'court_no' => 1,
         'team_a_score' => $a,
         'team_b_score' => $b,
+        'winner' => winnerFor($a, $b),
         'started_at' => $duration === null ? null : $finished->copy()->subMinutes($duration),
         'finished_at' => $finished,
     ]);

@@ -54,27 +54,48 @@
                         <x-match-teams :match="$match" :mixed="$mixed" />
 
                         <div class="mt-4 space-y-2">
-                            <flux:button variant="primary" icon="pencil-square" class="min-h-14 w-full text-base" wire:click="openPanel('score', {{ $match['id'] }})" data-test="score-button">{{ __('Enter score') }}</flux:button>
-                            <div class="grid grid-cols-3 gap-2">
+                            <div class="grid grid-cols-2 gap-2" role="group" aria-label="{{ __('Record the winner') }}">
+                                @foreach (['A', 'B'] as $team)
+                                    <flux:button
+                                        variant="primary"
+                                        icon="trophy"
+                                        :class="$panel === 'score' && $panelMatchId === $match['id'] && $winner === $team ? 'min-h-16 text-lg font-bold ring-4 ring-brand-300 dark:ring-brand-400' : 'min-h-16 text-lg font-bold'"
+                                        wire:click="declareWinner('{{ $team }}', {{ $match['id'] }})"
+                                        wire:loading.attr="disabled"
+                                        wire:target="declareWinner,finish"
+                                        data-test="win-{{ strtolower($team) }}"
+                                    >{{ __('Team :team wins', ['team' => $team]) }}</flux:button>
+                                @endforeach
+                            </div>
+                            <div class="grid grid-cols-2 gap-2">
                                 <flux:button class="min-h-12" icon="arrows-right-left" wire:click="openPanel('swap', {{ $match['id'] }})" data-test="swap-button">{{ __('Swap') }}</flux:button>
-                                <flux:button class="min-h-12" icon="user-minus" wire:click="openPanel('remove', {{ $match['id'] }})" data-test="remove-button">{{ __('Remove') }}</flux:button>
                                 <flux:button variant="ghost" class="min-h-12 text-red-700! dark:text-red-400!" icon="x-circle" wire:click="openPanel('void', {{ $match['id'] }})" data-test="void-button">{{ __('Void') }}</flux:button>
                             </div>
                         </div>
 
                         @if ($panel === 'score' && $panelMatchId === $match['id'])
-                            <form wire:submit="finish" class="mt-4 space-y-4 rounded-xl border-2 border-brand-600/60 bg-brand-50/50 p-4 dark:border-brand-500/60 dark:bg-brand-950/30" data-test="score-form">
-                                <p class="text-sm font-semibold text-zinc-900 dark:text-white">{{ __('Final score') }}</p>
-                                <div class="grid grid-cols-2 gap-4">
-                                    <flux:input wire:model.live.debounce.300ms="scoreA" type="number" min="0" inputmode="numeric" :label="__('Team A')" class:input="h-16! text-center text-3xl! font-bold tabular-nums" data-test="score-a" />
-                                    <flux:input wire:model.live.debounce.300ms="scoreB" type="number" min="0" inputmode="numeric" :label="__('Team B')" class:input="h-16! text-center text-3xl! font-bold tabular-nums" data-test="score-b" />
+                            @php $winnerA = $winner === 'A'; @endphp
+                            <form wire:submit="finish" wire:key="score-form-{{ $match['id'] }}-{{ $winner }}" class="mt-4 space-y-4 rounded-xl border-2 border-brand-600/60 bg-brand-50/50 p-4 dark:border-brand-500/60 dark:bg-brand-950/30" data-test="score-form" data-winner="{{ $winner }}">
+                                <div>
+                                    <p class="text-lg font-bold text-brand-800 dark:text-brand-200" data-test="score-form-heading">{{ __('Team :team wins', ['team' => $winner]) }}</p>
+                                    <p class="text-sm text-zinc-700 dark:text-zinc-300">{{ __('Enter the final score. Change the winning score for an extended game, such as 12 to 10.') }}</p>
                                 </div>
-                                @if ($this->scoreHint)
-                                    <flux:text class="text-sm font-medium text-amber-800 dark:text-amber-300" data-test="score-hint">{{ $this->scoreHint }}</flux:text>
-                                @endif
+                                <div class="grid grid-cols-2 gap-4">
+                                    <div @class(['rounded-xl p-2', 'bg-brand-100 ring-2 ring-brand-600 dark:bg-brand-900/50 dark:ring-brand-400' => $winnerA]) @unless ($winnerA) x-data x-init="$nextTick(() => $el.querySelector('input')?.focus())" @endunless>
+                                        <flux:input wire:model.live.debounce.300ms="scoreA" type="number" min="0" inputmode="numeric" :label="$winnerA ? __('Team A (winner)') : __('Team A')" class:input="h-16! text-center text-3xl! font-bold tabular-nums" data-test="score-a" />
+                                    </div>
+                                    <div @class(['rounded-xl p-2', 'bg-brand-100 ring-2 ring-brand-600 dark:bg-brand-900/50 dark:ring-brand-400' => ! $winnerA]) @if ($winnerA) x-data x-init="$nextTick(() => $el.querySelector('input')?.focus())" @endif>
+                                        <flux:input wire:model.live.debounce.300ms="scoreB" type="number" min="0" inputmode="numeric" :label="$winnerA ? __('Team B') : __('Team B (winner)')" class:input="h-16! text-center text-3xl! font-bold tabular-nums" data-test="score-b" />
+                                    </div>
+                                </div>
+                                <div aria-live="polite">
+                                    @if ($this->scoreHint)
+                                        <flux:text class="text-sm font-medium text-amber-800 dark:text-amber-300" data-test="score-hint">{{ $this->scoreHint }}</flux:text>
+                                    @endif
+                                </div>
                                 <div class="grid grid-cols-2 gap-2">
                                     <flux:button variant="primary" type="submit" class="min-h-14 text-base" data-test="finish-button">{{ __('Finish match') }}</flux:button>
-                                    <flux:button variant="ghost" type="button" class="min-h-14" wire:click="closePanel">{{ __('Cancel') }}</flux:button>
+                                    <flux:button variant="ghost" type="button" class="min-h-14" wire:click="closePanel" data-test="score-cancel">{{ __('Cancel') }}</flux:button>
                                 </div>
                             </form>
                         @endif

@@ -1,6 +1,7 @@
 <?php
 
 use App\Enums\MatchStatus;
+use App\Enums\Team;
 use App\Models\Club;
 use App\Models\GameMatch;
 use App\Models\MatchPlayer;
@@ -64,7 +65,7 @@ test('the podium images and the results of an ended guest session render', funct
     $players = Player::factory()->for($club)->manual(3)->count(4)->create();
     $match = GameMatch::factory()->create([
         'play_session_id' => $session->id, 'status' => MatchStatus::Done,
-        'team_a_score' => 11, 'team_b_score' => 5, 'court_no' => 1,
+        'team_a_score' => 11, 'team_b_score' => 5, 'winner' => Team::A, 'court_no' => 1,
         'started_at' => now()->subMinutes(15), 'finished_at' => now(),
     ]);
     foreach ([[0, 'A', 1], [1, 'A', 2], [2, 'B', 1], [3, 'B', 2]] as [$i, $team, $slot]) {

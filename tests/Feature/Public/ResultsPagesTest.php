@@ -30,7 +30,7 @@ function shareClub(string $name = 'Dink Club'): array
 function shareMatch(PlaySession $s, array $p, int $sa = 11, int $sb = 5, MatchStatus $status = MatchStatus::Done): void
 {
     $m = GameMatch::factory()->create([
-        'play_session_id' => $s->id, 'status' => $status, 'team_a_score' => $sa, 'team_b_score' => $sb,
+        'play_session_id' => $s->id, 'status' => $status, 'team_a_score' => $sa, 'team_b_score' => $sb, 'winner' => winnerFor($sa, $sb),
         'court_no' => 1, 'started_at' => now()->subMinutes(15), 'finished_at' => now(),
     ]);
     foreach ([[$p[0], 'A', 1], [$p[1], 'A', 2], [$p[2], 'B', 1], [$p[3], 'B', 2]] as [$pl, $team, $slot]) {

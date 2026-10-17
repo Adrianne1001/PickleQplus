@@ -138,7 +138,7 @@ test('finish records the score, counts the game, restarts the wait and frees the
     mService()->startMatch($session, $m);
     $ids = matchIds($m);
 
-    mService()->finish($session, $m, 11, 7);
+    mService()->finish($session, $m, Team::A, 11, 7);
 
     $fresh = $m->fresh();
     expect($fresh->status)->toBe(MatchStatus::Done)
@@ -158,16 +158,16 @@ test('finish rejects invalid scores and non-playing matches', function () {
     [$session] = board(8);
     $m = stagedOf($session)[0];
 
-    expect(fn () => mService()->finish($session, $m, 11, 5))->toThrow(ValidationException::class);
+    expect(fn () => mService()->finish($session, $m, Team::A, 11, 5))->toThrow(ValidationException::class);
 
     mService()->startMatch($session, $m);
     foreach ([[11, 10], [13, 10], [10, 8], [11, 11]] as [$a, $b]) {
-        expect(fn () => mService()->finish($session, $m, $a, $b))->toThrow(ValidationException::class);
+        expect(fn () => mService()->finish($session, $m, $a > $b ? Team::A : Team::B, $a, $b))->toThrow(ValidationException::class);
     }
     expect($m->fresh()->status)->toBe(MatchStatus::Playing);
 
-    mService()->finish($session, $m, 12, 10);
-    expect(fn () => mService()->finish($session, $m, 11, 3))->toThrow(ValidationException::class);
+    mService()->finish($session, $m, Team::A, 12, 10);
+    expect(fn () => mService()->finish($session, $m, Team::A, 11, 3))->toThrow(ValidationException::class);
 });
 
 test('finish uses the session scoring config', function () {
@@ -175,8 +175,8 @@ test('finish uses the session scoring config', function () {
     $m = stagedOf($session)[0];
     mService()->startMatch($session, $m);
 
-    expect(fn () => mService()->finish($session, $m, 11, 3))->toThrow(ValidationException::class);
-    mService()->finish($session, $m, 15, 14);
+    expect(fn () => mService()->finish($session, $m, Team::A, 11, 3))->toThrow(ValidationException::class);
+    mService()->finish($session, $m, Team::A, 15, 14);
     expect($m->fresh()->status)->toBe(MatchStatus::Done);
 });
 
@@ -184,7 +184,7 @@ test('auto_fill starts the next match when a court frees', function () {
     [$session] = board(8, ['courts' => 1, 'auto_fill' => true]);
     $first = GameMatch::query()->where('status', MatchStatus::Playing->value)->firstOrFail();
 
-    mService()->finish($session, $first, 11, 4);
+    mService()->finish($session, $first, Team::A, 11, 4);
 
     $playing = GameMatch::query()->where('status', MatchStatus::Playing->value)->get();
     expect($playing)->toHaveCount(1)->and($playing[0]->id)->not->toBe($first->id)->and($playing[0]->court_no)->toBe(1);
@@ -194,7 +194,7 @@ test('undo last result reverts to playing when the court and players are free', 
     [$session] = board(8);
     $m = stagedOf($session)[0];
     mService()->startMatch($session, $m);
-    mService()->finish($session, $m, 11, 6);
+    mService()->finish($session, $m, Team::A, 11, 6);
 
     mService()->undoLast($session);
 
@@ -210,7 +210,7 @@ test('undo after the four were re-staged voids that staged match and does not re
     [$session] = board(4);
     $m = stagedOf($session)[0];
     mService()->startMatch($session, $m);
-    mService()->finish($session, $m, 11, 6);
+    mService()->finish($session, $m, Team::A, 11, 6);
     $restaged = stagedOf($session);
     expect($restaged)->toHaveCount(1);
 
@@ -225,7 +225,7 @@ test('undo is blocked when the court is occupied', function () {
     [$s2] = board(8);
     $a = stagedOf($s2)[0];
     mService()->startMatch($s2, $a);
-    mService()->finish($s2, $a, 11, 6);
+    mService()->finish($s2, $a, Team::A, 11, 6);
     mService()->startMatch($s2, stagedOf($s2)[0], 1);
 
     expect(fn () => mService()->undoLast($s2))->toThrow(ValidationException::class);
@@ -235,7 +235,7 @@ test('undo is blocked when one of the players is playing or has left', function 
     [$session] = board(8);
     $m1 = stagedOf($session)[0];
     mService()->startMatch($session, $m1);
-    mService()->finish($session, $m1, 11, 6);
+    mService()->finish($session, $m1, Team::A, 11, 6);
     $m2 = stagedOf($session)[0];
     mService()->startMatch($session, $m2, 2);
     $out = Player::query()->findOrFail(matchIds($m2)[0]);
@@ -249,7 +249,7 @@ test('undo is blocked when one of the players is playing or has left', function 
     [$s3, $p3] = board(4);
     $b = stagedOf($s3)[0];
     mService()->startMatch($s3, $b);
-    mService()->finish($s3, $b, 11, 6);
+    mService()->finish($s3, $b, Team::A, 11, 6);
     app(CheckInService::class)->checkOut($s3, $p3[0]);
     expect(fn () => mService()->undoLast($s3))->toThrow(ValidationException::class);
 });
@@ -264,15 +264,15 @@ test('edit score works on any done match until DUPR exported', function () {
     $m = stagedOf($session)[0];
     mService()->startMatch($session, $m);
 
-    expect(fn () => mService()->editScore($session, $m, 11, 5))->toThrow(ValidationException::class);
+    expect(fn () => mService()->editResult($session, $m, Team::A, 11, 5))->toThrow(ValidationException::class);
 
-    mService()->finish($session, $m, 11, 5);
-    mService()->editScore($session, $m, 9, 11);
+    mService()->finish($session, $m, Team::A, 11, 5);
+    mService()->editResult($session, $m, Team::B, 9, 11);
     expect([$m->fresh()->team_a_score, $m->fresh()->team_b_score])->toBe([9, 11]);
-    expect(fn () => mService()->editScore($session, $m, 11, 10))->toThrow(ValidationException::class);
+    expect(fn () => mService()->editResult($session, $m, Team::A, 11, 10))->toThrow(ValidationException::class);
 
     $m->forceFill(['dupr_exported_at' => now()])->save();
-    expect(fn () => mService()->editScore($session, $m, 11, 3))->toThrow(ValidationException::class);
+    expect(fn () => mService()->editResult($session, $m, Team::A, 11, 3))->toThrow(ValidationException::class);
     expect(fn () => mService()->void($session, $m))->toThrow(ValidationException::class);
 });
 
@@ -292,11 +292,12 @@ test('swap exchanges a player in a playing match with a waiting one', function (
         ->and(entryOf($session, $in)->status)->toBe(SessionPlayerStatus::Playing);
 });
 
-test('swap rejects a player in another match, a non-waiting player, and a foreign player', function () {
+test('swap rejects a player on a court, a non-waiting player, and a foreign player', function () {
     [$session] = board(8);
     $staged = stagedOf($session)[0];
     mService()->startMatch($session, $staged);
     $second = stagedOf($session)[0];
+    mService()->startMatch($session, $second);
     $out = Player::query()->findOrFail(matchIds($staged)[0]);
     $inOther = Player::query()->findOrFail(matchIds($second)[0]);
 
@@ -319,33 +320,6 @@ test('swap works on a staged match without changing statuses', function () {
     mService()->swap($session, $m, $out, $in);
 
     expect(matchIds($m))->toContain($in->id)->and(entryOf($session, $in)->status)->toBe(SessionPlayerStatus::Waiting);
-});
-
-test('remove fills the slot with a waiting player and sends the removed player to break or left', function (SessionPlayerStatus $status) {
-    [$session] = board(9);
-    $m = stagedOf($session)[0];
-    mService()->startMatch($session, $m);
-    $removed = Player::query()->findOrFail(matchIds($m)[1]);
-
-    mService()->remove($session, $m, $removed, $status);
-
-    $ids = matchIds($m);
-    expect($ids)->toHaveCount(4)->not->toContain($removed->id)
-        ->and(entryOf($session, $removed)->status)->toBe($status)
-        ->and(entryOf($session, $removed)->games_played)->toBe(0);
-    expect(SessionPlayer::query()->whereIn('player_id', $ids)->where('status', 'playing')->count())->toBe(4);
-})->with([SessionPlayerStatus::Waiting, SessionPlayerStatus::Break, SessionPlayerStatus::Left]);
-
-test('remove is blocked when nobody is available', function () {
-    [$session] = board(4);
-    $m = stagedOf($session)[0];
-    mService()->startMatch($session, $m);
-    $removed = Player::query()->findOrFail(matchIds($m)[0]);
-
-    expect(fn () => mService()->remove($session, $m, $removed))->toThrow(ValidationException::class);
-
-    expect(matchIds($m))->toContain($removed->id)
-        ->and(entryOf($session, $removed)->status)->toBe(SessionPlayerStatus::Playing);
 });
 
 test('void a staged match frees players and restages', function () {
@@ -377,7 +351,7 @@ test('void a done match decrements games played', function () {
     [$session] = board(4);
     $m = stagedOf($session)[0];
     mService()->startMatch($session, $m);
-    mService()->finish($session, $m, 11, 2);
+    mService()->finish($session, $m, Team::A, 11, 2);
 
     mService()->void($session, $m);
 
@@ -454,7 +428,7 @@ test('repeat history alone separates the splits of the same four players', funct
     $first = stagedOf($session)[0];
     $firstTeams = teamSets($first);
     mService()->startMatch($session, $first);
-    mService()->finish($session, $first, 11, 3);
+    mService()->finish($session, $first, Team::A, 11, 3);
 
     $second = stagedOf($session)[0]->load('matchPlayers');
     expect(matchIds($second))->toBe(matchIds($first))
@@ -465,13 +439,13 @@ test('undo restores timestamps from the previous done match or check-in', functi
     [$session] = board(4);
     $m1 = stagedOf($session)[0];
     mService()->startMatch($session, $m1);
-    mService()->finish($session, $m1, 11, 3);
+    mService()->finish($session, $m1, Team::A, 11, 3);
     $m1Finished = $m1->fresh()->finished_at->getTimestamp();
 
     $this->travel(30)->seconds();
     $m2 = stagedOf($session)[0];
     mService()->startMatch($session, $m2);
-    mService()->finish($session, $m2, 11, 4);
+    mService()->finish($session, $m2, Team::A, 11, 4);
 
     mService()->undoLast($session);
 
@@ -485,7 +459,7 @@ test('undo restores timestamps from the previous done match or check-in', functi
     [$s2] = board(4);
     $only = stagedOf($s2)[0];
     mService()->startMatch($s2, $only);
-    mService()->finish($s2, $only, 11, 3);
+    mService()->finish($s2, $only, Team::A, 11, 3);
     mService()->undoLast($s2);
     foreach (matchIds($only) as $id) {
         $e = SessionPlayer::query()->where('player_id', $id)->where('play_session_id', $s2->id)->firstOrFail();
@@ -498,7 +472,7 @@ test('undo is blocked when a player is on break', function () {
     [$session, $players] = board(4);
     $m = stagedOf($session)[0];
     mService()->startMatch($session, $m);
-    mService()->finish($session, $m, 11, 6);
+    mService()->finish($session, $m, Team::A, 11, 6);
     app(CheckInService::class)->goOnBreak($session, $players[0]);
 
     expect(fn () => mService()->undoLast($session))->toThrow(ValidationException::class);
@@ -514,8 +488,8 @@ test('a stale match instance cannot start or finish twice', function () {
     expect(GameMatch::query()->where('status', MatchStatus::Playing->value)->count())->toBe(1);
 
     $staleFinish = GameMatch::query()->findOrFail($m->id);
-    mService()->finish($session, $m, 11, 3);
-    expect(fn () => mService()->finish($session, $staleFinish, 11, 3))->toThrow(ValidationException::class);
+    mService()->finish($session, $m, Team::A, 11, 3);
+    expect(fn () => mService()->finish($session, $staleFinish, Team::A, 11, 3))->toThrow(ValidationException::class);
     foreach (matchIds($m) as $id) {
         expect(SessionPlayer::query()->where('player_id', $id)->firstOrFail()->games_played)->toBe(1);
     }

@@ -1,6 +1,7 @@
 <?php
 
 use App\Enums\MatchStatus;
+use App\Enums\Team;
 use App\Events\PlaySessionChanged;
 use App\Events\SessionUpdated;
 use App\Models\Club;
@@ -81,7 +82,7 @@ test('finishing a match that refills and auto-starts broadcasts once', function 
     $match = GameMatch::query()->where('play_session_id', $session->id)->where('status', MatchStatus::Playing->value)->firstOrFail();
 
     Event::fake([SessionUpdated::class]);
-    app(MatchService::class)->finish($session, $match, 11, 5);
+    app(MatchService::class)->finish($session, $match, Team::A, 11, 5);
     defer()->invoke();
 
     Event::assertDispatchedTimes(SessionUpdated::class, 1);

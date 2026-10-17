@@ -30,7 +30,7 @@ function resPlayers(Club $club, string ...$names): array
 function resMatch(PlaySession $s, array $a, array $b, ?int $sa, ?int $sb, MatchStatus $status = MatchStatus::Done, int $finishedMinutesAgo = 0): GameMatch
 {
     $m = GameMatch::factory()->create([
-        'play_session_id' => $s->id, 'status' => $status, 'team_a_score' => $sa, 'team_b_score' => $sb,
+        'play_session_id' => $s->id, 'status' => $status, 'team_a_score' => $sa, 'team_b_score' => $sb, 'winner' => winnerFor($sa, $sb),
         'court_no' => 1, 'started_at' => now()->subMinutes(15 + $finishedMinutesAgo), 'finished_at' => now()->subMinutes($finishedMinutesAgo),
     ]);
     foreach ([[$a, 'A'], [$b, 'B']] as [$team, $letter]) {

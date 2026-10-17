@@ -25,6 +25,7 @@ new #[Title('Club settings')] class extends Component {
 
     public string $late_arrival_policy = 'minimum';
     public bool $allow_concurrent_sessions = false;
+    public bool $require_score = true;
 
     public string $leaderboard_min_games = '10';
 
@@ -46,6 +47,7 @@ new #[Title('Club settings')] class extends Component {
         $this->default_courts = (string) $this->club->default_courts;
         $this->late_arrival_policy = $this->club->late_arrival_policy->value;
         $this->allow_concurrent_sessions = $this->club->allow_concurrent_sessions;
+        $this->require_score = $this->club->require_score;
         $this->leaderboard_min_games = (string) $this->club->leaderboard_min_games;
         $this->star_bands = array_map(
             fn ($b): string => number_format((float) $b, 2, '.', ''),
@@ -96,6 +98,7 @@ new #[Title('Club settings')] class extends Component {
         $clubs->updateSessionSettings($this->club, [
             'late_arrival_policy' => $this->late_arrival_policy,
             'allow_concurrent_sessions' => $this->allow_concurrent_sessions,
+            'require_score' => $this->require_score,
         ]);
 
         $this->fillFromClub();
@@ -300,6 +303,13 @@ new #[Title('Club settings')] class extends Component {
                     <flux:description>{{ __('Off by default. A player can still be checked in to only one live session at a time.') }}</flux:description>
                 </flux:field>
                 <flux:error name="allow_concurrent_sessions" />
+
+                <flux:field variant="inline">
+                    <flux:checkbox wire:model="require_score" data-test="require-score" />
+                    <flux:label>{{ __('Require a score for every match') }}</flux:label>
+                    <flux:description>{{ __('On by default. Turn it off to record just who won with one tap. Matches without a score are not sent to DUPR. Each session can override this.') }}</flux:description>
+                </flux:field>
+                <flux:error name="require_score" />
             </div>
             <x-slot:footer>
                 <flux:button variant="primary" type="submit" data-test="save-session-settings-button">{{ __('Save session settings') }}</flux:button>

@@ -32,19 +32,20 @@ use Illuminate\Support\Str;
  * @property string|null $checkin_password
  * @property int $up_next_count
  * @property bool $auto_fill
+ * @property bool $require_score
  * @property Carbon|null $started_at
  * @property Carbon|null $ended_at
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  */
-#[Fillable(['name', 'date', 'courts', 'scoring', 'up_next_count', 'auto_fill', 'rotation_mode', 'mode_settings'])]
+#[Fillable(['name', 'date', 'courts', 'scoring', 'up_next_count', 'auto_fill', 'require_score', 'rotation_mode', 'mode_settings'])]
 class PlaySession extends Model
 {
     /** @use HasFactory<PlaySessionFactory> */
     use HasFactory;
 
     /** @var array<string, mixed> */
-    protected $attributes = ['rotation_mode' => 'balanced'];
+    protected $attributes = ['rotation_mode' => 'balanced', 'require_score' => true];
 
     /** @var list<string> */
     protected $hidden = ['checkin_password'];
@@ -150,6 +151,7 @@ class PlaySession extends Model
             'rotation_mode' => RotationMode::class,
             'up_next_count' => 'integer',
             'auto_fill' => 'boolean',
+            'require_score' => 'boolean',
             'checkin_password' => 'encrypted',
             'started_at' => 'datetime',
             'ended_at' => 'datetime',

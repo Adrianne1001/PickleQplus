@@ -44,6 +44,7 @@ function statsMatch(PlaySession $session, array $a, array $b, ?int $sa = 11, ?in
         'status' => $status,
         'team_a_score' => $sa,
         'team_b_score' => $sb,
+        'winner' => winnerFor($sa, $sb),
         'court_no' => 1,
         'started_at' => now()->subMinutes(15),
         'finished_at' => now(),

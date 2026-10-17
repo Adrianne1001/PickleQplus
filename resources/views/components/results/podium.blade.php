@@ -24,7 +24,7 @@
     <div class="mx-4 mb-5 rounded-2xl bg-white/10 px-5 py-8 text-center ring-1 ring-white/15 sm:mx-8" data-test="podium-empty">
         <p class="text-4xl" aria-hidden="true">🏓</p>
         <p class="mt-2 text-lg font-bold">{{ __('No finished matches yet') }}</p>
-        <p class="mt-1 text-sm text-brand-100">{{ __('The podium appears once matches with scores are done.') }}</p>
+        <p class="mt-1 text-sm text-brand-100">{{ __('The podium appears once matches are finished.') }}</p>
     </div>
 @else
     <div class="px-3 sm:px-8" data-test="podium" data-count="{{ count($slots) }}">

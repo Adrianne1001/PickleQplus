@@ -21,24 +21,25 @@ use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 /**
- * Read-only stats (Phase 5). Only done matches with both scores set count; the
- * source of truth is matches/match_players. Staff methods return full names and
+ * Read-only stats (Phase 5, changed in Phase 18). A match counts when it is done and has a
+ * winner; played, wins and losses use every counted match, and points use only counted
+ * matches with both scores. The source of truth is matches/match_players. Staff methods return full names and
  * numeric ids; the public* methods return only public display names and
  * players.public_id (see PublicLeaderboard).
  *
  * @phpstan-type PublicRow array{rank: int|null, id: string, name: string, played: int, wins: int, losses: int, win_pct: int, point_diff: int}
  * @phpstan-type PublicLeaderboard array{period: string, min_games: int, ranked: list<PublicRow>, unranked: list<PublicRow>}
- * @phpstan-type LogRow array{id: int, court: int|null, status: string, void: bool, finished_at: Carbon|null, duration_minutes: int|null, team_a: list<string>, team_b: list<string>, score_a: int|null, score_b: int|null}
+ * @phpstan-type LogRow array{id: int, court: int|null, status: string, void: bool, finished_at: Carbon|null, duration_minutes: int|null, team_a: list<string>, team_b: list<string>, score_a: int|null, score_b: int|null, winner: 'A'|'B'|null}
  * @phpstan-type ProfileRecord array{played: int, wins: int, losses: int, win_pct: int|null, points_for: int, points_against: int, point_diff: int, sessions_attended: int, last_played: Carbon|null}
  * @phpstan-type PartnerRow array{player_id: int, name: string, games: int, wins: int, win_pct: int}
  * @phpstan-type OpponentRow array{player_id: int, name: string, games: int, wins: int, losses: int}
  * @phpstan-type Profile array{record: ProfileRecord, partners: list<PartnerRow>, opponents: list<OpponentRow>}
- * @phpstan-type HistoryRow array{match_id: int, date: Carbon, session_id: int, session_name: string, partner: string|null, opponents: list<string>, score_for: int, score_against: int, won: bool}
+ * @phpstan-type HistoryRow array{match_id: int, date: Carbon, session_id: int, session_name: string, partner: string|null, opponents: list<string>, score_for: int|null, score_against: int|null, won: bool}
  */
 class StatsService
 {
-    /** SQL condition: the match_players row (mp) is on the higher-scoring team of match m. */
-    public const WON_SQL = "(mp.team = 'A' and m.team_a_score > m.team_b_score) or (mp.team = 'B' and m.team_b_score > m.team_a_score)";
+    /** SQL condition: the match_players row (mp) is on the winning team of match m. */
+    public const WON_SQL = 'mp.team = m.winner';
 
     public const PER_PAGE = 20;
 
@@ -152,13 +153,16 @@ class StatsService
         $last = null;
         $byMatch = [];
         foreach ($rows as $r) {
-            [$for, $against] = $this->sides($r['team'], $r['a'], $r['b']);
-            $pf += $for;
-            $pa += $against;
-            $wins += $for > $against ? 1 : 0;
+            if ($r['a'] !== null && $r['b'] !== null) {
+                [$for, $against] = $this->sides($r['team'], $r['a'], $r['b']);
+                $pf += $for;
+                $pa += $against;
+            }
+            $won = $r['team'] === $r['winner'];
+            $wins += $won ? 1 : 0;
             $sessions[$r['session_id']] = true;
             $last = $r['date'];
-            $byMatch[$r['match_id']] = ['team' => $r['team'], 'won' => $for > $against];
+            $byMatch[$r['match_id']] = ['team' => $r['team'], 'won' => $won];
         }
         $played = count($rows);
 
@@ -247,7 +251,8 @@ class StatsService
                     $opponents[] = $o['name'];
                 }
             }
-            [$for, $against] = $this->sides($team, $row['a'], $row['b']);
+            $scored = $row['a'] !== null && $row['b'] !== null;
+            [$for, $against] = $scored ? $this->sides($team, (int) $row['a'], (int) $row['b']) : [null, null];
 
             return [
                 'match_id' => $mid,
@@ -258,7 +263,7 @@ class StatsService
                 'opponents' => $opponents,
                 'score_for' => $for,
                 'score_against' => $against,
-                'won' => $for > $against,
+                'won' => $team === $row['winner'],
             ];
         });
     }
@@ -291,7 +296,7 @@ class StatsService
     // ------------------------------------------------------------------ helpers
 
     /**
-     * Per-player totals over done, fully scored matches of a club, grouped in SQL.
+     * Per-player totals over done matches that have a winner (points only from scored ones), grouped in SQL.
      *
      * @param  callable(Builder): mixed  $scope
      * @return list<StatRow>
@@ -307,14 +312,13 @@ class StatsService
             ->where('s.club_id', $clubId)
             ->where('p.club_id', $clubId)
             ->where('m.status', MatchStatus::Done->value)
-            ->whereNotNull('m.team_a_score')
-            ->whereNotNull('m.team_b_score')
+            ->whereNotNull('m.winner')
             ->when($activeOnly, fn (Builder $q) => $q->where('p.active', true))
             ->groupBy('p.id', 'p.name')
             ->selectRaw('p.id as player_id, p.name as player_name, count(*) as played')
             ->selectRaw("sum(case when {$won} then 1 else 0 end) as wins")
-            ->selectRaw("sum(case when mp.team = 'A' then m.team_a_score else m.team_b_score end) as points_for")
-            ->selectRaw("sum(case when mp.team = 'A' then m.team_b_score else m.team_a_score end) as points_against");
+            ->selectRaw("sum(case when m.team_a_score is not null and m.team_b_score is not null then (case when mp.team = 'A' then m.team_a_score else m.team_b_score end) else 0 end) as points_for")
+            ->selectRaw("sum(case when m.team_a_score is not null and m.team_b_score is not null then (case when mp.team = 'A' then m.team_b_score else m.team_a_score end) else 0 end) as points_against");
 
         $scope($query);
 
@@ -337,7 +341,7 @@ class StatsService
         return $query;
     }
 
-    /** One player's done, scored matches in the club and period (one row per match). */
+    /** One player's done matches with a winner in the club and period (one row per match). */
     private function playerMatches(Club $club, Player $player, StatsPeriod $period): Builder
     {
         $query = DB::table('match_players as mp')
@@ -346,9 +350,8 @@ class StatsService
             ->where('mp.player_id', $player->id)
             ->where('s.club_id', $club->id)
             ->where('m.status', MatchStatus::Done->value)
-            ->whereNotNull('m.team_a_score')
-            ->whereNotNull('m.team_b_score')
-            ->select('m.id as match_id', 'm.team_a_score', 'm.team_b_score', 'mp.team', 's.id as play_session_id', 's.name as session_name', 's.date');
+            ->whereNotNull('m.winner')
+            ->select('m.id as match_id', 'm.team_a_score', 'm.team_b_score', 'm.winner', 'mp.team', 's.id as play_session_id', 's.name as session_name', 's.date');
 
         return $this->wherePeriod($query, $period);
     }
@@ -386,7 +389,7 @@ class StatsService
     }
 
     /**
-     * @return array{match_id: int, team: string, a: int, b: int, session_id: int, session_name: string, date: Carbon}
+     * @return array{match_id: int, team: string, a: int|null, b: int|null, winner: string|null, session_id: int, session_name: string, date: Carbon}
      */
     private function matchRow(object $r): array
     {
@@ -395,8 +398,9 @@ class StatsService
         return [
             'match_id' => (int) $f['match_id'],
             'team' => (string) $f['team'],
-            'a' => (int) $f['team_a_score'],
-            'b' => (int) $f['team_b_score'],
+            'a' => $f['team_a_score'] === null ? null : (int) $f['team_a_score'],
+            'b' => $f['team_b_score'] === null ? null : (int) $f['team_b_score'],
+            'winner' => $f['winner'] === null ? null : (string) $f['winner'],
             'session_id' => (int) $f['play_session_id'],
             'session_name' => (string) $f['session_name'],
             'date' => Carbon::parse((string) $f['date'])->startOfDay(),
@@ -470,6 +474,7 @@ class StatsService
                 'team_b' => $names[$m->id]['B'] ?? [],
                 'score_a' => $m->team_a_score,
                 'score_b' => $m->team_b_score,
+                'winner' => $m->winner?->value,
             ];
         }
 

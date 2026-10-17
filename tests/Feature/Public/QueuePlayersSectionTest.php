@@ -21,7 +21,7 @@ function playersSectionSetup(): array
         SessionPlayer::factory()->create(['play_session_id' => $session->id, 'player_id' => $p->id, 'status' => SessionPlayerStatus::Waiting, 'games_played' => $p->is($players[0]) ? 3 : 0]);
     }
     foreach ([[11, 5], [11, 2]] as [$a, $b]) {
-        $match = GameMatch::factory()->for($session)->create(['status' => MatchStatus::Done, 'court_no' => null, 'team_a_score' => $a, 'team_b_score' => $b]);
+        $match = GameMatch::factory()->for($session)->create(['status' => MatchStatus::Done, 'court_no' => null, 'team_a_score' => $a, 'team_b_score' => $b, 'winner' => winnerFor($a, $b)]);
         foreach ($players as $i => $p) {
             MatchPlayer::factory()->create(['match_id' => $match->id, 'player_id' => $p->id, 'team' => $i < 2 ? 'A' : 'B', 'slot' => $i % 2 + 1]);
         }

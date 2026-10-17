@@ -30,6 +30,7 @@ function winsMatch(PlaySession $session, Player $hero, array $others, MatchStatu
         'started_at' => now(),
         'team_a_score' => $a,
         'team_b_score' => $b,
+        'winner' => winnerFor($a, $b),
     ]);
     $four = $heroOnA ? [$hero, ...$others] : [...$others, $hero];
     foreach ($four as $i => $p) {

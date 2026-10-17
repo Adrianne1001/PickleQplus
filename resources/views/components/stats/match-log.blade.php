@@ -2,7 +2,7 @@
 
 {{--
     Match log rows from StatsService::matchLog / SessionResultsService (matches). Void rows stay greyed and struck
-    through. The winning team is bold with a "Won" marker (none when the score is missing or tied).
+    through. The winning team is bold with a "Won" marker. A winner-only match (no scores) shows no score pill.
     A finish on a different day than the session (or the previous row) shows the date too.
     Phone: each row becomes a stacked card.
 --}}
@@ -26,7 +26,7 @@
                     $void = $m['void'] ?? false;
                     $a = $m['score_a'] ?? null;
                     $b = $m['score_b'] ?? null;
-                    $winner = (! $void && $a !== null && $b !== null && (int) $a !== (int) $b) ? ((int) $a > (int) $b ? 'a' : 'b') : null;
+                    $winner = (! $void && ($m['winner'] ?? null) !== null) ? strtolower((string) $m['winner']) : null;
                     $finished = $m['finished_at'] ?? null;
                     $day = $finished?->toDateString();
                     $showDate = $finished !== null && $prevDay !== null && $day !== $prevDay;
@@ -35,7 +35,7 @@
                     }
                     $time = $finished === null ? '–' : $finished->format($showDate ? 'M j · H:i' : 'H:i');
                     $teams = ['a' => $m['team_a'], 'b' => $m['team_b']];
-                    $score = ($a ?? '–').' - '.($b ?? '–');
+                    $score = $a !== null && $b !== null ? $a.' - '.$b : null;
                     $duration = \App\Support\StatsPresenter::duration($m['duration_minutes'] ?? null);
                 @endphp
                 <tr @class(['text-zinc-600 dark:text-zinc-400' => $void, 'max-sm:flex max-sm:flex-wrap max-sm:items-center max-sm:gap-x-3 max-sm:gap-y-2 max-sm:p-4'])
@@ -63,14 +63,18 @@
                                     </div>
                                 @endforeach
                             </div>
-                            <span class="shrink-0 rounded-full bg-zinc-100 px-3 py-1 text-sm font-extrabold tabular-nums text-zinc-900 dark:bg-zinc-800 dark:text-white sm:hidden">{{ $score }}</span>
+                            @if ($score !== null)
+                                <span class="shrink-0 rounded-full bg-zinc-100 px-3 py-1 text-sm font-extrabold tabular-nums text-zinc-900 dark:bg-zinc-800 dark:text-white sm:hidden" data-test="score-pill">{{ $score }}</span>
+                            @endif
                         </div>
                         @if ($void)
                             <flux:badge size="sm" color="zinc" class="mt-1">{{ __('void') }}</flux:badge>
                         @endif
                     </td>
                     <td class="whitespace-nowrap px-4 py-3 text-end max-sm:hidden">
-                        <span class="inline-block rounded-full bg-zinc-100 px-3 py-1 text-sm font-extrabold tabular-nums text-zinc-900 dark:bg-zinc-800 dark:text-white">{{ $score }}</span>
+                        @if ($score !== null)
+                            <span class="inline-block rounded-full bg-zinc-100 px-3 py-1 text-sm font-extrabold tabular-nums text-zinc-900 dark:bg-zinc-800 dark:text-white" data-test="score-pill">{{ $score }}</span>
+                        @endif
                     </td>
                     <td class="whitespace-nowrap px-4 py-3 text-end tabular-nums max-sm:hidden">{{ $duration }}</td>
                 </tr>

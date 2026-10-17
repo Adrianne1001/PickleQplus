@@ -16,7 +16,7 @@ use Illuminate\Support\Facades\DB;
 /**
  * Read models for the shareable results pages (Phase 11): one session's results
  * (staff and public variants) and the public past-sessions list. Counting rules
- * are the Phase 5 ones (done matches with both scores set).
+ * are the Phase 18 ones (done matches with a winner; points only from matches with both scores).
  *
  * Staff variant: numeric player ids (`id`) for profile links, void matches in
  * the log. Public variant: only `name` and `public_id`, done matches only.
@@ -115,7 +115,8 @@ class SessionResultsService
         $club = $session->club ?? Club::query()->findOrFail($session->club_id);
         $standings = $this->stats->sessionStandings($session);
         $log = $this->stats->matchLog($session, includeVoid: ! $public);
-        $counted = array_values(array_filter($log, fn (array $m): bool => ! $m['void'] && $m['score_a'] !== null && $m['score_b'] !== null));
+        $counted = array_values(array_filter($log, fn (array $m): bool => ! $m['void'] && $m['winner'] !== null));
+        $scored = array_values(array_filter($counted, fn (array $m): bool => $m['score_a'] !== null && $m['score_b'] !== null));
 
         $publicPlayers = $public
             ? $this->stats->publicPlayers(array_map(fn (RankedRow $r): int => (int) $r->row->id, $standings))
@@ -127,7 +128,7 @@ class SessionResultsService
         }
 
         $points = 0;
-        foreach ($counted as $m) {
+        foreach ($scored as $m) {
             $points += (int) $m['score_a'] + (int) $m['score_b'];
         }
 
@@ -157,7 +158,7 @@ class SessionResultsService
             'totals' => ['matches' => count($counted), 'players' => count($standings), 'points' => $points, 'courts' => (int) $session->courts],
             'standings' => $rows,
             'podium' => $counted === [] ? [] : array_slice($rows, 0, 3),
-            'highlights' => $this->highlights($rows, $counted, $public),
+            'highlights' => $this->highlights($rows, $scored, $public),
             'previous' => $this->neighbour($session, previous: true, public: $public),
             'next' => $this->neighbour($session, previous: false, public: $public),
             'matches' => $matches,
@@ -202,7 +203,7 @@ class SessionResultsService
 
     /**
      * @param  list<ResultsRow>  $rows
-     * @param  list<array<string, mixed>>  $counted  Done, scored log rows in finish order.
+     * @param  list<array<string, mixed>>  $counted  Done log rows with both scores, in finish order.
      * @return array{most_games: PlayerHighlight, best_point_diff: PlayerHighlight, closest_match: MatchHighlight, biggest_win: MatchHighlight}
      */
     private function highlights(array $rows, array $counted, bool $public): array
@@ -355,13 +356,12 @@ class SessionResultsService
             ->where('p.club_id', $clubId)
             ->whereIn('m.play_session_id', $sessionIds)
             ->where('m.status', MatchStatus::Done->value)
-            ->whereNotNull('m.team_a_score')
-            ->whereNotNull('m.team_b_score')
+            ->whereNotNull('m.winner')
             ->groupBy('m.play_session_id', 'p.id', 'p.name')
             ->selectRaw('m.play_session_id as session_id, p.id as player_id, p.name as player_name, count(*) as played')
             ->selectRaw("sum(case when {$won} then 1 else 0 end) as wins")
-            ->selectRaw("sum(case when mp.team = 'A' then m.team_a_score else m.team_b_score end) as points_for")
-            ->selectRaw("sum(case when mp.team = 'A' then m.team_b_score else m.team_a_score end) as points_against")
+            ->selectRaw("sum(case when m.team_a_score is not null and m.team_b_score is not null then (case when mp.team = 'A' then m.team_a_score else m.team_b_score end) else 0 end) as points_for")
+            ->selectRaw("sum(case when m.team_a_score is not null and m.team_b_score is not null then (case when mp.team = 'A' then m.team_b_score else m.team_a_score end) else 0 end) as points_against")
             ->get();
 
         $out = [];
@@ -386,8 +386,7 @@ class SessionResultsService
         $rows = DB::table('matches')
             ->whereIn('play_session_id', $sessionIds)
             ->where('status', MatchStatus::Done->value)
-            ->whereNotNull('team_a_score')
-            ->whereNotNull('team_b_score')
+            ->whereNotNull('winner')
             ->groupBy('play_session_id')
             ->selectRaw('play_session_id, count(*) as c')
             ->get();

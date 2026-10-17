@@ -52,7 +52,7 @@ class PlaySessionService
     /**
      * Create a draft session. Missing settings take the club defaults.
      *
-     * @param  array{name?: string|null, date?: mixed, courts?: int|null, up_next_count?: int|null, auto_fill?: bool|null, scoring?: array<string, mixed>|null, rotation_mode?: RotationMode|string|null, mode_settings?: array<string, mixed>|null}  $data
+     * @param  array{name?: string|null, date?: mixed, courts?: int|null, up_next_count?: int|null, auto_fill?: bool|null, require_score?: bool|null, scoring?: array<string, mixed>|null, rotation_mode?: RotationMode|string|null, mode_settings?: array<string, mixed>|null}  $data
      *
      * @throws ValidationException
      */
@@ -69,6 +69,7 @@ class PlaySessionService
             'courts' => $club->default_courts,
             'up_next_count' => 1,
             'auto_fill' => false,
+            'require_score' => $club->require_score,
             'scoring' => self::DEFAULT_SCORING,
             'rotation_mode' => RotationMode::Balanced->value,
         ], null, $club);
@@ -94,7 +95,7 @@ class PlaySessionService
     }
 
     /**
-     * Partial update of name, date, courts, up_next_count, auto_fill, scoring,
+     * Partial update of name, date, courts, up_next_count, auto_fill, require_score, scoring,
      * rotation_mode and mode_settings. Allowed while draft or live. A court that
      * has a playing match can't be removed. A change that voids Up Next on a live
      * session (see changeVoidsUpNext()) voids the staged matches (playing matches
@@ -112,7 +113,7 @@ class PlaySessionService
             $this->lockSession($session);
             $this->guardNotEnded($session);
 
-            $merged = array_replace($session->only(['name', 'date', 'courts', 'up_next_count', 'auto_fill', 'scoring']), ['rotation_mode' => $session->rotation_mode->value], $data);
+            $merged = array_replace($session->only(['name', 'date', 'courts', 'up_next_count', 'auto_fill', 'require_score', 'scoring']), ['rotation_mode' => $session->rotation_mode->value], $data);
             $merged['date'] = $merged['date'] instanceof \DateTimeInterface ? $merged['date']->format('Y-m-d') : $merged['date'];
             if (isset($data['scoring']) && is_array($data['scoring'])) {
                 $merged['scoring'] = array_replace($session->scoring, $data['scoring']);
@@ -401,7 +402,7 @@ class PlaySessionService
 
     /**
      * @param  array<string, mixed>  $data
-     * @return array{name: string, date: string, courts: int, up_next_count: int, auto_fill: bool, scoring: array{type: string, games: int, to: int, win_by: int}, rotation_mode: string, mode_settings?: array{winners_stay_max_wins: int, skill_groups: list<array<string, int>>}}
+     * @return array{name: string, date: string, courts: int, up_next_count: int, auto_fill: bool, require_score: bool, scoring: array{type: string, games: int, to: int, win_by: int}, rotation_mode: string, mode_settings?: array{winners_stay_max_wins: int, skill_groups: list<array<string, int>>}}
      *
      * @throws ValidationException
      */
@@ -417,6 +418,7 @@ class PlaySessionService
             'courts' => ['required', 'integer', 'between:'.self::COURTS_MIN.','.$maxCourts],
             'up_next_count' => ['required', 'integer', 'between:1,3'],
             'auto_fill' => ['required', 'boolean'],
+            'require_score' => ['required', 'boolean'],
             'scoring' => ['required', 'array'],
             'scoring.type' => ['required', Rule::in(['side_out'])],
             'scoring.games' => ['required', Rule::in([1])],
@@ -438,6 +440,7 @@ class PlaySessionService
             'courts' => (int) $validated['courts'],
             'up_next_count' => (int) $validated['up_next_count'],
             'auto_fill' => (bool) $validated['auto_fill'],
+            'require_score' => (bool) $validated['require_score'],
             'scoring' => [
                 'type' => 'side_out',
                 'games' => 1,

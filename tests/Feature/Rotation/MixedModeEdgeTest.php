@@ -40,22 +40,6 @@ test('swap works when the outgoing player has no gender', function () {
     expect(matchIds($match->fresh()))->toContain($players[4]->id)->not->toContain($out->id);
 });
 
-test('remove falls back to a gendered player when the remaining teammate has no gender', function () {
-    [$session] = mixedBoard('MMWWMWMW');
-    $match = stagedOf($session)[0];
-    $rows = $match->matchPlayers()->get();
-    $removeRow = $rows->first();
-    $mate = $rows->first(fn ($r) => $r->team === $removeRow->team && $r->player_id !== $removeRow->player_id);
-    Player::query()->whereKey($mate->player_id)->update(['gender' => null]);
-
-    app(MatchService::class)->remove($session, $match, Player::findOrFail($removeRow->player_id));
-
-    $ids = matchIds($match->fresh());
-    expect($ids)->not->toContain($removeRow->player_id)->toHaveCount(4);
-    $new = collect($ids)->diff($rows->pluck('player_id'))->first();
-    expect(Player::findOrFail($new)->gender)->not->toBeNull();
-});
-
 test('setting the gender of a playing player keeps the match going', function () {
     [$session] = mixedBoard('MMWW', ['auto_fill' => true]);
     $playing = GameMatch::query()->where('play_session_id', $session->id)->where('status', MatchStatus::Playing->value)->firstOrFail();

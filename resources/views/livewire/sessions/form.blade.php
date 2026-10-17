@@ -107,6 +107,13 @@
                     <flux:label>{{ __('Auto-fill courts') }}</flux:label>
                     <flux:description>{{ __('Start the next Up Next match automatically when a court frees up.') }}</flux:description>
                 </flux:field>
+
+                <flux:field variant="inline">
+                    <flux:checkbox wire:model="require_score" :disabled="$ended" data-test="require-score" />
+                    <flux:label>{{ __('Require a score for every match') }}</flux:label>
+                    <flux:description>{{ __('When off, a tap on "Team A wins" or "Team B wins" records the result with no score. Matches without a score are not sent to DUPR. Results already recorded are not changed.') }}</flux:description>
+                </flux:field>
+                <flux:error name="require_score" />
             </div>
         </x-card>
 

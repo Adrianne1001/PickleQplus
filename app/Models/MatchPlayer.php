@@ -28,6 +28,8 @@ class MatchPlayer extends Model
     protected function casts(): array
     {
         return [
+            'match_id' => 'integer',
+            'player_id' => 'integer',
             'team' => Team::class,
             'slot' => 'integer',
         ];

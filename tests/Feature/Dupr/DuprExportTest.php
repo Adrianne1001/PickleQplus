@@ -213,7 +213,7 @@ test('exported matches cannot be edited, voided or undone', function () {
     app(DuprExportService::class)->export($session, $user);
     $m->refresh();
 
-    expect(fn () => app(MatchService::class)->editScore($session, $m, 11, 3))->toThrow(ValidationException::class, 'already exported');
+    expect(fn () => app(MatchService::class)->editResult($session, $m, Team::A, 11, 3))->toThrow(ValidationException::class, 'already exported');
     expect(fn () => app(MatchService::class)->void($session, $m))->toThrow(ValidationException::class, 'already exported');
     expect(fn () => app(MatchService::class)->undoLast($session))->toThrow(ValidationException::class);
 

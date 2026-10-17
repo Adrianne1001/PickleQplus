@@ -11,7 +11,7 @@ function tblRow(?int $rank, string $name, int $played = 5, int $wins = 3, int $d
 function logRow(array $over = []): array
 {
     return $over + ['court' => 2, 'finished_at' => Carbon::parse('2026-10-08 13:21'), 'duration_minutes' => 12,
-        'team_a' => ['Ann', 'Bob'], 'team_b' => ['Cy', 'Di'], 'score_a' => 11, 'score_b' => 7];
+        'team_a' => ['Ann', 'Bob'], 'team_b' => ['Cy', 'Di'], 'score_a' => 11, 'score_b' => 7, 'winner' => 'A'];
 }
 
 it('puts medals on the top 3 and lets tied ranks share one', function () {
@@ -43,16 +43,16 @@ it('formats the point diff and renders the caption', function () {
         ->assertSee('Club · PickleQ+');
 });
 
-it('marks the winning team and nothing on a tie', function () {
+it('marks the winning team, also without scores, and nothing without a winner', function () {
     $win = [logRow()];
-    $tie = [logRow(['score_a' => 9, 'score_b' => 9])];
-    $none = [logRow(['score_a' => null, 'score_b' => null])];
+    $winnerOnly = [logRow(['score_a' => null, 'score_b' => null])];
+    $none = [logRow(['score_a' => null, 'score_b' => null, 'winner' => null])];
 
     $view = $this->blade('<x-stats.match-log :matches="$m" />', ['m' => $win]);
     $view->assertSee('Won');
     expect((string) $view)->toMatch('/data-winner="1"\s*>\s*<span>Ann &amp; Bob<\/span>\s*<span[^>]*data-test="won-marker"/');
 
-    $this->blade('<x-stats.match-log :matches="$m" />', ['m' => $tie])->assertDontSee('won-marker', false);
+    $this->blade('<x-stats.match-log :matches="$m" />', ['m' => $winnerOnly])->assertSee('won-marker', false);
     $this->blade('<x-stats.match-log :matches="$m" />', ['m' => $none])->assertDontSee('won-marker', false);
 });
 

@@ -24,6 +24,7 @@ use Illuminate\Support\Carbon;
  * @property LateArrivalPolicy $late_arrival_policy
  * @property bool $allow_concurrent_sessions
  * @property int $leaderboard_min_games
+ * @property bool $require_score
  * @property bool $is_guest
  * @property string|null $guest_token_hash
  * @property Carbon|null $guest_expires_at
@@ -31,7 +32,7 @@ use Illuminate\Support\Carbon;
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  */
-#[Fillable(['name', 'slug', 'dupr_club_id', 'star_bands', 'default_courts', 'late_arrival_policy', 'allow_concurrent_sessions', 'leaderboard_min_games'])]
+#[Fillable(['name', 'slug', 'dupr_club_id', 'star_bands', 'default_courts', 'late_arrival_policy', 'allow_concurrent_sessions', 'leaderboard_min_games', 'require_score'])]
 class Club extends Model
 {
     /** @use HasFactory<ClubFactory> */
@@ -44,6 +45,7 @@ class Club extends Model
         'late_arrival_policy' => 'minimum',
         'allow_concurrent_sessions' => false,
         'leaderboard_min_games' => 10,
+        'require_score' => true,
         'is_guest' => false,
     ];
 
@@ -76,6 +78,7 @@ class Club extends Model
             'late_arrival_policy' => LateArrivalPolicy::class,
             'allow_concurrent_sessions' => 'boolean',
             'leaderboard_min_games' => 'integer',
+            'require_score' => 'boolean',
             'is_guest' => 'boolean',
             'guest_expires_at' => 'datetime',
             'guest_claimed_at' => 'datetime',

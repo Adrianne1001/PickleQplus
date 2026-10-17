@@ -2,6 +2,7 @@
 
 namespace App\Livewire\Sessions;
 
+use App\Enums\MatchStatus;
 use App\Livewire\Sessions\Concerns\InteractsWithBoard;
 use App\Livewire\Sessions\Concerns\ManagesMatchPlayers;
 use App\Services\MatchService;
@@ -9,12 +10,11 @@ use App\Services\PlaySessionService;
 use App\Services\SessionBoard;
 use Illuminate\Contracts\View\View;
 use Illuminate\Validation\ValidationException;
-use Livewire\Attributes\Computed;
 use Livewire\Attributes\On;
 use Livewire\Component;
 
 /**
- * Staged matches: send to a court, re-roll, swap, remove and void, plus the
+ * Staged matches: send to a court, re-roll, swap and void, plus the
  * auto-fill toggle and the Up Next count.
  */
 class UpNext extends Component
@@ -86,23 +86,16 @@ class UpNext extends Component
         $this->changed();
     }
 
-    /**
-     * Waiting players who could be swapped in.
-     *
-     * @return list<array{id: int, name: string, stars: int|null, games_played: int, waited_minutes: int, estimate_minutes: int|null}>
-     */
-    #[Computed]
-    public function candidates(): array
+    /** @return list<MatchStatus> */
+    protected function panelStatuses(): array
     {
-        if ($this->panel !== 'swap') {
-            return [];
-        }
-
-        return app(SessionBoard::class)->waiting($this->session);
+        return [MatchStatus::Staged];
     }
 
     public function render(): View
     {
+        $this->syncPanel();
+
         $board = app(SessionBoard::class);
 
         return view('livewire.sessions.up-next', [

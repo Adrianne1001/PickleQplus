@@ -43,6 +43,8 @@ class Form extends Component
 
     public string $up_next_count = '1';
 
+    public bool $require_score = true;
+
     public bool $auto_fill = false;
 
     public string $to = '11';
@@ -118,6 +120,7 @@ class Form extends Component
             $this->name = 'Open Play';
             $this->date = now()->toDateString();
             $this->courts = (string) $club->default_courts;
+            $this->require_score = $club->require_score;
             $scoring = PlaySessionService::DEFAULT_SCORING;
         } else {
             abort_unless($session->club_id === $club->id, 404);
@@ -129,6 +132,7 @@ class Form extends Component
             $this->courts = (string) $session->courts;
             $this->up_next_count = (string) $session->up_next_count;
             $this->auto_fill = $session->auto_fill;
+            $this->require_score = $session->require_score;
             $this->rotation_mode = $session->rotation_mode->value;
             $this->checkin_password = (string) $session->checkin_password;
             if ($session->rotation_mode === RotationMode::SkillCourts) {
@@ -242,6 +246,7 @@ class Form extends Component
             'courts' => (int) $this->courts,
             'up_next_count' => (int) $this->up_next_count,
             'auto_fill' => $this->auto_fill,
+            'require_score' => $this->require_score,
             'rotation_mode' => $this->rotation_mode,
             'checkin_password' => $this->checkin_password,
             'scoring' => array_replace(PlaySessionService::DEFAULT_SCORING, [

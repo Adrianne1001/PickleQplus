@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\MatchStatus;
+use App\Enums\Team;
 use Database\Factories\GameMatchFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -21,6 +22,7 @@ use Illuminate\Support\Carbon;
  * @property MatchStatus $status
  * @property int|null $team_a_score
  * @property int|null $team_b_score
+ * @property Team|null $winner
  * @property Carbon|null $started_at
  * @property Carbon|null $finished_at
  * @property bool $dupr_eligible
@@ -29,7 +31,7 @@ use Illuminate\Support\Carbon;
  * @property Carbon|null $dupr_synced_at
  * @property string|null $dupr_match_ref
  */
-#[Fillable(['play_session_id', 'court_no', 'status', 'team_a_score', 'team_b_score', 'started_at', 'finished_at', 'dupr_eligible'])]
+#[Fillable(['play_session_id', 'court_no', 'status', 'team_a_score', 'team_b_score', 'winner', 'started_at', 'finished_at', 'dupr_eligible'])]
 class GameMatch extends Model
 {
     /** @use HasFactory<GameMatchFactory> */
@@ -48,6 +50,7 @@ class GameMatch extends Model
             'status' => MatchStatus::class,
             'team_a_score' => 'integer',
             'team_b_score' => 'integer',
+            'winner' => Team::class,
             'started_at' => 'datetime',
             'finished_at' => 'datetime',
             'dupr_eligible' => 'boolean',

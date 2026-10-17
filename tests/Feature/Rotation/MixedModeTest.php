@@ -4,9 +4,12 @@ use App\Enums\Gender;
 use App\Enums\MatchStatus;
 use App\Enums\RotationMode;
 use App\Enums\SessionPlayerStatus;
+use App\Enums\Team;
 use App\Models\GameMatch;
+use App\Models\MatchPlayer;
 use App\Models\Player;
 use App\Models\PlaySession;
+use App\Models\SessionPlayer;
 use App\Services\CheckInService;
 use App\Services\MatchService;
 use App\Services\PlayerService;
@@ -94,26 +97,6 @@ test('swap only accepts a player of the same gender', function () {
     expect(matchIds($match->fresh()))->toContain($players[4]->id)->not->toContain($out->id);
 });
 
-test('remove fills the slot with the same gender', function () {
-    [$session] = mixedBoard('MMWWMWMW');
-    $match = stagedOf($session)[0];
-    $removed = genderedPlayerOf($match, 'woman');
-
-    app(MatchService::class)->remove($session, $match, $removed);
-
-    expect(teamGenders($match->fresh()))->toBe([['man', 'woman'], ['man', 'woman']])
-        ->and(matchIds($match->fresh()))->not->toContain($removed->id);
-});
-
-test('remove is blocked when no one of that gender is waiting', function () {
-    [$session] = mixedBoard('MMWWMM');
-    $match = stagedOf($session)[0];
-    $woman = genderedPlayerOf($match, 'woman');
-
-    expect(fn () => app(MatchService::class)->remove($session, $match, $woman))->toThrow(ValidationException::class)
-        ->and(matchIds($match->fresh()))->toContain($woman->id);
-});
-
 test('re-roll stages a different mixed match', function () {
     [$session] = mixedBoard('MMMMWWWW');
     $match = stagedOf($session)[0];
@@ -183,7 +166,7 @@ test('finishing a match keeps staging and playing mixed matches only', function 
     [$session] = mixedBoard('MMMMWWWW', ['auto_fill' => true]);
     $playing = GameMatch::query()->where('play_session_id', $session->id)->where('status', MatchStatus::Playing->value)->firstOrFail();
 
-    app(MatchService::class)->finish($session, $playing, 11, 5);
+    app(MatchService::class)->finish($session, $playing, Team::A, 11, 5);
 
     $open = GameMatch::query()->where('play_session_id', $session->id)->whereIn('status', [MatchStatus::Staged->value, MatchStatus::Playing->value])->get();
     expect($open)->not->toBeEmpty();
@@ -229,4 +212,51 @@ test('staff match rows carry gender, and gender never reaches the public courts 
         ->and(json_encode($snap['courts']))->not->toContain('gender')
         ->and(json_encode($snap['up_next']))->not->toContain('gender')
         ->and(json_encode($snap))->not->toContain('gender');
+});
+
+test('swapping in an Up Next player of the same gender refills their match with the same gender', function () {
+    [$session] = mixedBoard('MMWWMMWWMW', ['up_next_count' => 2]);
+    [$first, $second] = stagedOf($session)->all();
+    $out = genderedPlayerOf($first, 'woman');
+    $in = genderedPlayerOf($second, 'woman');
+
+    app(MatchService::class)->swap($session, $first, $out, $in);
+
+    expect(matchIds($first->fresh()))->toContain($in->id)->not->toContain($out->id)
+        ->and($second->fresh()->status)->toBe(MatchStatus::Staged)
+        ->and(matchIds($second->fresh()))->toHaveCount(4)->not->toContain($in->id)
+        ->and(teamGenders($first->fresh()))->toBe([['man', 'woman'], ['man', 'woman']])
+        ->and(teamGenders($second->fresh()))->toBe([['man', 'woman'], ['man', 'woman']]);
+});
+
+test('swapping in an Up Next player of the other gender is refused and changes nothing', function () {
+    [$session] = mixedBoard('MMWWMMWW', ['up_next_count' => 2]);
+    [$first, $second] = stagedOf($session)->all();
+    $woman = genderedPlayerOf($first, 'woman');
+    $man = genderedPlayerOf($second, 'man');
+    $firstBefore = matchIds($first);
+    $secondBefore = matchIds($second);
+
+    expect(fn () => app(MatchService::class)->swap($session, $first, $woman, $man))->toThrow(ValidationException::class, 'same gender')
+        ->and(matchIds($first->fresh()))->toBe($firstBefore)
+        ->and(matchIds($second->fresh()))->toBe($secondBefore);
+});
+
+test('an Up Next match nobody of the needed gender can refill is voided and its players wait', function () {
+    [$session] = mixedBoard('MMWWMMWW', ['up_next_count' => 2]);
+    [$first, $second] = stagedOf($session)->all();
+    $out = genderedPlayerOf($first, 'man');
+    Player::query()->whereKey($out->id)->update(['gender' => null]);
+    $in = genderedPlayerOf($second, 'man');
+    $secondRest = array_values(array_diff(matchIds($second), [$in->id]));
+
+    app(MatchService::class)->swap($session, $first, $out->fresh(), $in);
+
+    // The swapped-out player has no gender, so the mixed engine cannot place them, and nobody else waits.
+    expect(matchIds($first->fresh()))->toContain($in->id)
+        ->and($second->fresh()->status)->toBe(MatchStatus::Void);
+    foreach ($secondRest as $id) {
+        expect(SessionPlayer::query()->where('player_id', $id)->value('status'))->toBe(SessionPlayerStatus::Waiting)
+            ->and(MatchPlayer::query()->where('player_id', $id)->whereIn('match_id', GameMatch::query()->whereIn('status', ['staged', 'playing'])->select('id'))->exists())->toBeFalse();
+    }
 });

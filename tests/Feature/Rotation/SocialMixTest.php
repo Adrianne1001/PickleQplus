@@ -13,6 +13,7 @@ use App\Services\PlaySessionService;
 use App\Services\Rotation\BalancedStrategy;
 use App\Services\Rotation\RotationQueries;
 use App\Services\Rotation\RotationStrategies;
+use App\Services\SessionBoard;
 use Illuminate\Validation\ValidationException;
 
 function socialSession(array $attrs = []): PlaySession
@@ -88,16 +89,17 @@ test('switching to and from social voids staged Up Next', function () {
         ->and(socialMatches($session, MatchStatus::Staged))->toHaveCount(1);
 });
 
-test('removing a player from a staged social match brings in a replacement', function () {
+test('swapping a player out of a staged social match with a waiting player works', function () {
     $session = socialSession(['courts' => 1]);
     socialJoin($session, 9);
     $match = socialMatches($session, MatchStatus::Staged)[0];
     $out = Player::findOrFail($match->matchPlayers()->first()->player_id);
+    $in = Player::findOrFail(app(SessionBoard::class)->waiting($session)[0]['id']);
 
-    app(MatchService::class)->remove($session, $match, $out);
+    app(MatchService::class)->swap($session, $match, $out, $in);
 
     $ids = $match->fresh()->matchPlayers()->pluck('player_id')->all();
-    expect($ids)->toHaveCount(4)->not->toContain($out->id);
+    expect($ids)->toHaveCount(4)->not->toContain($out->id)->toContain($in->id);
 });
 
 test('an unknown mode is still rejected', function () {

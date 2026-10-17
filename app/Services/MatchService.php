@@ -81,18 +81,21 @@ class MatchService
     }
 
     /**
-     * Record the score of a playing match: players return to waiting with a
-     * game counted and a fresh wait clock, and the court is freed.
+     * Record the result of a playing match: the winner, plus both scores or
+     * neither. Neither is allowed only when the session does not require a score.
+     * Scores must be valid and agree with the winner. Players return to waiting
+     * with a game counted and a fresh wait clock, and the court is freed.
      *
      * @throws ValidationException
      */
-    public function finish(PlaySession $session, GameMatch $match, int $teamA, int $teamB): GameMatch
+    public function finish(PlaySession $session, GameMatch $match, Team $winner, ?int $teamA = null, ?int $teamB = null): GameMatch
     {
-        return $this->change($session, $match, function (GameMatch $match) use ($session, $teamA, $teamB): void {
+        return $this->change($session, $match, function (GameMatch $match) use ($session, $winner, $teamA, $teamB): void {
             $this->requireStatus($match, MatchStatus::Playing, 'Only a match in progress can be finished.');
-            $this->guardScore($session, $teamA, $teamB);
+            $this->guardResult($session, $winner, $teamA, $teamB);
 
             $now = Carbon::now();
+            $match->winner = $winner;
             $match->team_a_score = $teamA;
             $match->team_b_score = $teamB;
             $match->status = MatchStatus::Done;
@@ -116,7 +119,7 @@ class MatchService
     /**
      * Revert the session's most recent done match to playing. Allowed only
      * when its court is free and none of its players is in a staged or
-     * playing match or has left. Otherwise use editScore().
+     * playing match or has left. Otherwise use editResult().
      *
      * @throws ValidationException
      */
@@ -156,7 +159,7 @@ class MatchService
 
             if (! $courtFree || $playing || $left) {
                 throw ValidationException::withMessages([
-                    'match' => 'This result cannot be undone because the court or its players are in use. Edit the score instead.',
+                    'match' => 'This result cannot be undone because the court or its players are in use. Edit the result instead.',
                 ]);
             }
 
@@ -171,6 +174,7 @@ class MatchService
                 $this->markVoid($staged);
             }
 
+            $match->winner = null;
             $match->team_a_score = null;
             $match->team_b_score = null;
             $match->status = MatchStatus::Playing;
@@ -201,17 +205,20 @@ class MatchService
     }
 
     /**
-     * Change the score of any done match that has not been DUPR-exported.
+     * Change the result of any done match that has not been DUPR-exported:
+     * the winner plus both scores or neither, under the same rules as finish().
+     * This is also how a score is added later to a winner-only match.
      *
      * @throws ValidationException
      */
-    public function editScore(PlaySession $session, GameMatch $match, int $teamA, int $teamB): GameMatch
+    public function editResult(PlaySession $session, GameMatch $match, Team $winner, ?int $teamA = null, ?int $teamB = null): GameMatch
     {
-        return $this->change($session, $match, function (GameMatch $match) use ($session, $teamA, $teamB): void {
+        return $this->change($session, $match, function (GameMatch $match) use ($session, $winner, $teamA, $teamB): void {
             $this->requireStatus($match, MatchStatus::Done, 'Only a finished match can be edited.');
             $this->guardExported($match);
-            $this->guardScore($session, $teamA, $teamB);
+            $this->guardResult($session, $winner, $teamA, $teamB);
 
+            $match->winner = $winner;
             $match->team_a_score = $teamA;
             $match->team_b_score = $teamB;
             $match->save();
@@ -219,15 +226,28 @@ class MatchService
     }
 
     /**
-     * Swap a player in a staged or playing match for a waiting player who is
-     * not in another match. The player swapped out goes back to waiting and
-     * keeps their place in the queue.
+     * Swap a player in a staged or playing match for a player who is waiting
+     * (in no match) or sits in another staged (Up Next) match. The player swapped
+     * out goes back to waiting and keeps their place in the queue.
+     *
+     * When the player coming in leaves an Up Next match, that match's empty slot is
+     * filled with the waiting player the engine ranks best (the swapped-out player
+     * included), or the match is voided when nobody fits. Up Next then refills as usual.
+     *
+     * Stale picks: pass `$verifySource` true to make the service check, under the lock, what the
+     * client saw. `$inMatchId` is the player's staged match id when picked from Up Next (the
+     * candidate's `match_id`) or null when picked from the waiting list. If the player has moved,
+     * the swap is refused with a `player` error. `$matchStatus` is the status the client saw on the
+     * match being edited; a different status is refused with a `match` error. Leave both off to skip.
      *
      * @throws ValidationException
      */
-    public function swap(PlaySession $session, GameMatch $match, Player $out, Player $in): GameMatch
+    public function swap(PlaySession $session, GameMatch $match, Player $out, Player $in, bool $verifySource = false, ?int $inMatchId = null, ?MatchStatus $matchStatus = null): GameMatch
     {
-        return $this->change($session, $match, function (GameMatch $match) use ($session, $out, $in): void {
+        return $this->change($session, $match, function (GameMatch $match) use ($session, $out, $in, $verifySource, $inMatchId, $matchStatus): void {
+            if ($matchStatus !== null && $match->status !== $matchStatus) {
+                throw ValidationException::withMessages(['match' => 'That match has changed. Reopen the swap.']);
+            }
             $this->requireOpenMatch($match);
 
             $row = $match->matchPlayers()->where('player_id', $out->id)->first();
@@ -238,13 +258,16 @@ class MatchService
                 throw ValidationException::withMessages(['player' => 'Choose a different player to swap in.']);
             }
 
-            $this->requireAvailable($session, $in);
+            $source = $this->swapSource($session, $match, $in, $verifySource, $inMatchId);
             // Re-read both players under the session lock (session, then player order) so a concurrent
             // gender change cannot slip past the mode's swap guard.
             $locked = Player::query()->whereIn('id', [$out->id, $in->id])->orderBy('id')->lockForUpdate()->get()->keyBy('id');
             $freshOut = $locked->get($out->id) ?? $out;
             $freshIn = $locked->get($in->id) ?? $in;
             RotationStrategies::for($session)->guardSwap($session, $match, $freshOut, $freshIn);
+
+            // The incoming player leaves their Up Next match first, so they are in one match only.
+            $vacated = $source === null ? null : $this->leaveStagedMatch($source, $in);
 
             $row->player_id = $in->id;
             $row->save();
@@ -253,62 +276,9 @@ class MatchService
                 $this->setStatus($session, [$out->id], SessionPlayerStatus::Waiting);
                 $this->setStatus($session, [$in->id], SessionPlayerStatus::Playing);
             }
-        });
-    }
 
-    /**
-     * Take a player out of a staged or playing match and fill the slot with
-     * the waiting player the engine ranks best. The removed player becomes
-     * waiting, break or left. No game is counted for them.
-     *
-     * If nobody is available to fill the slot the removal is blocked with a
-     * validation error and nothing changes.
-     *
-     * @throws ValidationException
-     */
-    public function remove(PlaySession $session, GameMatch $match, Player $player, SessionPlayerStatus $newStatus = SessionPlayerStatus::Waiting): GameMatch
-    {
-        return $this->change($session, $match, function (GameMatch $match) use ($session, $player, $newStatus): void {
-            $this->requireOpenMatch($match);
-
-            if ($newStatus === SessionPlayerStatus::Playing) {
-                throw ValidationException::withMessages(['status' => 'A removed player can only become waiting, on break or left.']);
-            }
-
-            $rows = $match->matchPlayers()->get();
-            $row = $rows->firstWhere('player_id', $player->id);
-            if ($row === null) {
-                throw ValidationException::withMessages(['player' => 'That player is not in this match.']);
-            }
-
-            $queries = $this->queries($session);
-            $entries = $this->entries($session, array_values($rows->pluck('player_id')->map(fn ($id): int => (int) $id)->all()))->keyBy('player_id');
-            $teamA = [];
-            $teamB = [];
-            foreach ($rows as $other) {
-                $entry = $entries->get($other->player_id);
-                if ($other->player_id === $player->id || $entry === null) {
-                    continue;
-                }
-                if ($other->team === Team::A) {
-                    $teamA[] = $queries->candidate($entry);
-                } else {
-                    $teamB[] = $queries->candidate($entry);
-                }
-            }
-
-            $result = RotationStrategies::for($session)->pickReplacement($session, $queries, $teamA, $teamB, $match->id);
-
-            if ($result === null) {
-                throw ValidationException::withMessages(['player' => 'No waiting player is available to take that slot.']);
-            }
-
-            $row->player_id = $result->playerId;
-            $row->save();
-
-            $this->setStatus($session, [$player->id], $newStatus);
-            if ($match->status === MatchStatus::Playing) {
-                $this->setStatus($session, [$result->playerId], SessionPlayerStatus::Playing);
+            if ($source !== null && $vacated !== null) {
+                $this->fillVacatedSlot($session, $source, $vacated);
             }
         });
     }
@@ -507,33 +477,98 @@ class MatchService
     /**
      * @return list<int>
      */
-    private function occupiedPlayerIds(PlaySession $session): array
-    {
-        return $this->queries($session)->occupiedPlayerIds();
-    }
-
-    /**
-     * @return list<int>
-     */
     private function busyCourts(PlaySession $session): array
     {
         return $this->queries($session)->busyCourts();
     }
 
     /**
+     * Where the player coming in is now: null when they are waiting in no match, or the
+     * staged match they sit in (locked). A player on a court, in the match being edited,
+     * on break or gone is refused.
+     *
      * @throws ValidationException
      */
-    private function requireAvailable(PlaySession $session, Player $player): void
+    private function swapSource(PlaySession $session, GameMatch $match, Player $in, bool $verifySource, ?int $inMatchId): ?GameMatch
     {
         $entry = SessionPlayer::query()
             ->where('play_session_id', $session->id)
-            ->where('player_id', $player->id)
+            ->where('player_id', $in->id)
             ->first();
+        if ($entry === null || $entry->status !== SessionPlayerStatus::Waiting) {
+            throw ValidationException::withMessages(['player' => $verifySource && $entry !== null
+                ? 'That player has moved. Pick again.'
+                : 'That player is not waiting, or is already in another match.']);
+        }
 
-        if ($entry === null || $entry->status !== SessionPlayerStatus::Waiting
-            || in_array($player->id, $this->occupiedPlayerIds($session), true)) {
+        $open = GameMatch::query()
+            ->where('play_session_id', $session->id)
+            ->whereIn('status', [MatchStatus::Staged->value, MatchStatus::Playing->value])
+            ->whereHas('matchPlayers', fn ($q) => $q->where('player_id', $in->id))
+            ->lockForUpdate()
+            ->first();
+        if ($verifySource && $open?->id !== $inMatchId) {
+            throw ValidationException::withMessages(['player' => 'That player has moved. Pick again.']);
+        }
+        if ($open === null) {
+            return null;
+        }
+        if ($open->status !== MatchStatus::Staged || $open->id === $match->id) {
             throw ValidationException::withMessages(['player' => 'That player is not waiting, or is already in another match.']);
         }
+
+        return $open;
+    }
+
+    /**
+     * Take a player out of a staged match and return the slot they leave.
+     */
+    private function leaveStagedMatch(GameMatch $staged, Player $player): ?MatchPlayer
+    {
+        $row = $staged->matchPlayers()->where('player_id', $player->id)->first();
+        $row?->delete();
+
+        return $row;
+    }
+
+    /**
+     * Fill the slot a swapped-in player left in a staged match with the waiting player the
+     * engine ranks best, or void the match when nobody fits. Runs after the player swapped
+     * out is waiting again, so they can be the one picked.
+     */
+    private function fillVacatedSlot(PlaySession $session, GameMatch $staged, MatchPlayer $vacated): void
+    {
+        $queries = $this->queries($session);
+        $rows = $staged->matchPlayers()->get();
+        $entries = $this->entries($session, array_values($rows->pluck('player_id')->map(fn ($id): int => (int) $id)->all()))->keyBy('player_id');
+
+        $teamA = [];
+        $teamB = [];
+        foreach ($rows as $other) {
+            $entry = $entries->get($other->player_id);
+            if ($entry === null) {
+                continue;
+            }
+            if ($other->team === Team::A) {
+                $teamA[] = $queries->candidate($entry);
+            } else {
+                $teamB[] = $queries->candidate($entry);
+            }
+        }
+
+        $result = RotationStrategies::for($session)->pickReplacement($session, $queries, $teamA, $teamB, $staged->id);
+        if ($result === null) {
+            $this->markVoid($staged);
+
+            return;
+        }
+
+        MatchPlayer::query()->create([
+            'match_id' => $staged->id,
+            'player_id' => $result->playerId,
+            'team' => $vacated->team,
+            'slot' => $vacated->slot,
+        ]);
     }
 
     /**
@@ -567,13 +602,33 @@ class MatchService
     }
 
     /**
+     * Scores are both or neither, and neither only when the session does not require
+     * a score. Given scores must be valid and agree with the winner.
+     *
      * @throws ValidationException
      */
-    private function guardScore(PlaySession $session, int $teamA, int $teamB): void
+    private function guardResult(PlaySession $session, Team $winner, ?int $teamA, ?int $teamB): void
     {
+        if (($teamA === null) !== ($teamB === null)) {
+            throw ValidationException::withMessages(['score' => 'Enter both scores, or neither.']);
+        }
+
+        if ($teamA === null || $teamB === null) {
+            if ($session->require_score) {
+                throw ValidationException::withMessages(['score' => 'This session requires a score for every match.']);
+            }
+
+            return;
+        }
+
         $error = ScoreValidator::error($session->scoring, $teamA, $teamB);
         if ($error !== null) {
             throw ValidationException::withMessages(['score' => $error]);
+        }
+
+        if ($winner === Team::A ? $teamA <= $teamB : $teamB <= $teamA) {
+            $name = $winner === Team::A ? 'A' : 'B';
+            throw ValidationException::withMessages(['score' => "Team {$name}'s score must be higher."]);
         }
     }
 

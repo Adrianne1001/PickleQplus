@@ -147,11 +147,11 @@ class ClubService
     }
 
     /**
-     * Owner-only session settings: late arrival policy and whether several
-     * sessions may be live at once. Only keys present in $data change. The
+     * Owner-only session settings: late arrival policy, whether several
+     * sessions may be live at once, and whether a score is required by default. Only keys present in $data change. The
      * club row is locked so a concurrent session start sees a consistent value.
      *
-     * @param  array{late_arrival_policy?: LateArrivalPolicy|string, allow_concurrent_sessions?: bool}  $data
+     * @param  array{late_arrival_policy?: LateArrivalPolicy|string, allow_concurrent_sessions?: bool, require_score?: bool}  $data
      *
      * @throws ValidationException
      */
@@ -160,6 +160,7 @@ class ClubService
         $validated = Validator::make($data, [
             'late_arrival_policy' => ['sometimes', 'required', Rule::enum(LateArrivalPolicy::class)],
             'allow_concurrent_sessions' => ['sometimes', 'required', 'boolean'],
+            'require_score' => ['sometimes', 'required', 'boolean'],
         ])->validate();
 
         DB::transaction(function () use ($club, $validated): void {
@@ -171,6 +172,9 @@ class ClubService
             }
             if (array_key_exists('allow_concurrent_sessions', $validated)) {
                 $club->allow_concurrent_sessions = (bool) $validated['allow_concurrent_sessions'];
+            }
+            if (array_key_exists('require_score', $validated)) {
+                $club->require_score = (bool) $validated['require_score'];
             }
 
             $club->save();

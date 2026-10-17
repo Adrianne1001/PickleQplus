@@ -179,6 +179,7 @@ class DemoSeeder extends Seeder
                 'status' => $void ? MatchStatus::Void : MatchStatus::Done,
                 'team_a_score' => $void ? null : $scores[0],
                 'team_b_score' => $void ? null : $scores[1],
+                'winner' => $void ? null : ($scores[0] > $scores[1] ? Team::A : Team::B),
                 'started_at' => $void ? null : $matchStart,
                 'finished_at' => $void ? null : $matchStart->copy()->addMinutes(12),
                 'dupr_eligible' => ! $void && collect($four)->every(fn (Player $p): bool => $p->dupr_id !== null),
@@ -249,7 +250,7 @@ class DemoSeeder extends Seeder
             ->oldest('id')
             ->first();
         if ($first !== null) {
-            $matches->finish($session, $first, 11, 7);
+            $matches->finish($session, $first, Team::A, 11, 7);
         }
     }
 }

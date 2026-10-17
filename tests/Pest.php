@@ -4,6 +4,7 @@ use App\Enums\ClubRole;
 use App\Enums\Gender;
 use App\Enums\MatchStatus;
 use App\Enums\RotationMode;
+use App\Enums\Team;
 use App\Models\Club;
 use App\Models\GameMatch;
 use App\Models\Player;
@@ -126,6 +127,16 @@ function board(int $n, array $attrs = []): array
 function listPlayers(PlaySession $session, Player ...$players): void
 {
     app(SessionListService::class)->add($session, array_map(fn (Player $p): int => $p->id, $players));
+}
+
+/** The winner a scored done match has: the higher score, or null without two scores or on a tie. */
+function winnerFor(?int $a, ?int $b): ?Team
+{
+    if ($a === null || $b === null || $a === $b) {
+        return null;
+    }
+
+    return $a > $b ? Team::A : Team::B;
 }
 
 function stagedOf(PlaySession $s)

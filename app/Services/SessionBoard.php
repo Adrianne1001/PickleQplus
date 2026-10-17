@@ -28,6 +28,7 @@ use Illuminate\Support\Facades\DB;
  * @phpstan-type StagedRow array{id: int, court: int|null, status: string, teams: array{A: list<PlayerRow>, B: list<PlayerRow>}, player_ids: list<int>, group: int|null, elapsed_minutes: int|null, score_a: int|null, score_b: int|null, finished_at: CarbonInterface|null, exported: bool, number: int, free_courts: list<int>}
  * @phpstan-type CourtRow array{court: int, match: MatchRow|null, up_next: list<StagedRow>}
  * @phpstan-type QueueRow array{id: int, name: string, stars: int|null, games_played: int, wins: int, waited_minutes: int, estimate_minutes: int|null, gender: string|null, needs_gender: bool, group: int|null, group_position: int|null}
+ * @phpstan-type SwapRow array{id: int, name: string, stars: int|null, games_played: int, wins: int, waited_minutes: int, estimate_minutes: int|null, gender: string|null, needs_gender: bool, group: int|null, group_position: int|null, source: 'waiting'|'up_next', up_next_number: int|null, match_id: int|null}
  * @phpstan-type GroupRow array{index: int, label: string, min_stars: int, max_stars: int, courts: list<int>, waiting: int, staged: int}
  */
 class SessionBoard
@@ -216,6 +217,61 @@ class SessionBoard
     }
 
     /**
+     * Players who can be swapped into a match: first the free waiting players, exactly as
+     * waiting() lists them (same order and fields), then the players of the other staged
+     * (Up Next) matches, each marked `source` "up_next" with that match's Up Next number
+     * (the same number the Up Next cards show), its id and group. Players on a court and
+     * players of $matchId itself are never listed. Rows from Up Next carry no wait estimate.
+     *
+     * @return list<SwapRow>
+     */
+    public function swapCandidates(PlaySession $session, int $matchId): array
+    {
+        $wins = $this->winsByPlayer($session);
+
+        $rows = [];
+        foreach ($this->waiting($session, $wins) as $row) {
+            $rows[] = $row + ['source' => 'waiting', 'up_next_number' => null, 'match_id' => null];
+        }
+
+        $staged = $this->stagedRows($session, [], false);
+        $others = array_values(array_filter($staged, static fn (array $row): bool => $row['id'] !== $matchId));
+        if ($others === []) {
+            return $rows;
+        }
+
+        $ids = [];
+        foreach ($others as $row) {
+            array_push($ids, ...$row['player_ids']);
+        }
+        $entries = SessionPlayer::query()
+            ->where('play_session_id', $session->id)
+            ->whereIn('player_id', $ids)
+            ->with('player')
+            ->get()
+            ->keyBy('player_id');
+        $mixed = $session->rotation_mode === RotationMode::Mixed;
+
+        foreach ($others as $row) {
+            foreach (['A', 'B'] as $team) {
+                foreach ($row['teams'][$team] as $player) {
+                    $entry = $entries->get($player['id']);
+                    if ($entry === null) {
+                        continue;
+                    }
+                    $rows[] = $this->queueRow($entry, null, $wins, $mixed, $row['group']) + [
+                        'source' => 'up_next',
+                        'up_next_number' => $row['number'],
+                        'match_id' => $row['id'],
+                    ];
+                }
+            }
+        }
+
+        return $rows;
+    }
+
+    /**
      * The skill groups of a skill courts session with their star ranges, court numbers,
      * waiting counts (from waiting() rows, pass them in to avoid a second query) and
      * staged counts. Empty in every other mode. Staff-only: the stars are not public.
@@ -322,10 +378,7 @@ class SessionBoard
         $total = $this->doneCount($session);
         $rows = [];
         foreach ($matches as $index => $match) {
-            $winner = null;
-            if ($match->team_a_score !== null && $match->team_b_score !== null && $match->team_a_score !== $match->team_b_score) {
-                $winner = $match->team_a_score > $match->team_b_score ? 'A' : 'B';
-            }
+            $winner = $match->winner?->value;
             $duration = $match->started_at === null || $match->finished_at === null
                 ? null
                 : max(0, (int) floor($match->started_at->diffInSeconds($match->finished_at, true) / 60));
@@ -391,8 +444,8 @@ class SessionBoard
     }
 
     /**
-     * Wins in this session per player id (one grouped query). A win is a done match with both
-     * scores set where the player's team scored higher. Players with no wins are absent.
+     * Wins in this session per player id (one grouped query). A win is a done match where the player's
+     * team is the match winner (scores are not needed). Players with no wins are absent.
      *
      * @return array<int, int>
      */
@@ -402,8 +455,7 @@ class SessionBoard
             ->join('matches as m', 'm.id', '=', 'mp.match_id')
             ->where('m.play_session_id', $session->id)
             ->where('m.status', MatchStatus::Done->value)
-            ->whereNotNull('m.team_a_score')
-            ->whereNotNull('m.team_b_score')
+            ->whereNotNull('m.winner')
             ->groupBy('mp.player_id')
             ->selectRaw('mp.player_id as player_id')
             ->selectRaw('sum(case when '.StatsService::WON_SQL.' then 1 else 0 end) as wins')

@@ -110,7 +110,8 @@ test('the swap panel shows the same-gender error', function () {
         ->call('openPanel', 'swap', $match->id)
         ->set('outPlayerId', (string) $out->id)
         ->set('inPlayerId', (string) $players[5]->id)
-        ->assertSee('(W)')
+        ->assertSeeHtml('data-test="in-option" data-player="'.$players[5]->id.'"')
+        ->assertSeeHtml('data-gender="woman"')
         ->call('swap')
         ->assertHasErrors('player')
         ->assertSee('swap in a player of the same gender as the player leaving');

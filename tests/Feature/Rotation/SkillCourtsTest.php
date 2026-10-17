@@ -3,10 +3,13 @@
 use App\Domain\Rotation\SkillGroups;
 use App\Enums\MatchStatus;
 use App\Enums\RotationMode;
+use App\Enums\SessionPlayerStatus;
+use App\Enums\Team;
 use App\Models\Club;
 use App\Models\GameMatch;
 use App\Models\Player;
 use App\Models\PlaySession;
+use App\Models\SessionPlayer;
 use App\Services\CheckInService;
 use App\Services\MatchService;
 use App\Services\PlaySessionService;
@@ -252,7 +255,7 @@ test('when a court frees up the waiting match of that group takes it', function 
     $onCourtTwo = GameMatch::query()->where('play_session_id', $session->id)->where('court_no', 2)->where('status', MatchStatus::Playing->value)->firstOrFail();
     $waiting = skillMatches($session, MatchStatus::Staged)[0];
 
-    app(MatchService::class)->finish($session, $onCourtTwo, 11, 3);
+    app(MatchService::class)->finish($session, $onCourtTwo, Team::A, 11, 3);
 
     expect($waiting->fresh()->status)->toBe(MatchStatus::Playing)->and($waiting->fresh()->court_no)->toBe(2);
 });
@@ -290,32 +293,6 @@ test('re-roll with nobody else in the group re-stages the same players', functio
     expect(matchIds($new))->toBe($before);
 });
 
-test('remove picks the replacement from the match\'s group only', function () {
-    $session = skillBoard();
-    $high = skillJoin($session, [5, 5, 5, 5, 5]);
-    skillJoin($session, [2, 2, 2, 2, 2]);
-    $match = collect(skillMatches($session, MatchStatus::Staged))->firstWhere('court_group', 1);
-    $out = Player::findOrFail($match->matchPlayers()->first()->player_id);
-    $waitingHigh = collect($high)->first(fn (Player $p) => ! in_array($p->id, matchIds($match), true));
-
-    app(MatchService::class)->remove($session, $match, $out);
-
-    expect(matchIds($match->fresh()))->toContain($waitingHigh->id)
-        ->and(min(matchStars($match->fresh())))->toBeGreaterThanOrEqual(4);
-});
-
-test('remove is blocked when nobody in the group is available, even if other groups have waiting players', function () {
-    $session = skillBoard();
-    skillJoin($session, [5, 5, 5, 5]);
-    skillJoin($session, [2, 2, 2, 2, 2]);
-    $match = collect(skillMatches($session, MatchStatus::Staged))->firstWhere('court_group', 1);
-    $out = Player::findOrFail($match->matchPlayers()->first()->player_id);
-
-    expect(fn () => app(MatchService::class)->remove($session, $match, $out))
-        ->toThrow(ValidationException::class, 'No waiting player is available to take that slot.');
-    expect(matchIds($match->fresh()))->toContain($out->id);
-});
-
 test('a swap may cross groups and the match keeps its group and courts', function () {
     $session = skillBoard();
     skillJoin($session, [5, 5, 5, 5]);
@@ -331,48 +308,6 @@ test('a swap may cross groups and the match keeps its group and courts', functio
 
     app(MatchService::class)->startMatch($session, $match->fresh());
     expect($match->fresh()->court_no)->toBe(1);
-});
-
-test('remove on a playing match uses the group of its court even after a groups edit left a stale index', function () {
-    $session = skillBoard(['courts' => 6, 'auto_fill' => true, 'mode_settings' => ['winners_stay_max_wins' => 2, 'skill_groups' => [
-        ['from_court' => 1, 'to_court' => 2, 'min_stars' => 5, 'max_stars' => 6],
-        ['from_court' => 3, 'to_court' => 4, 'min_stars' => 3, 'max_stars' => 4],
-        ['from_court' => 5, 'to_court' => 6, 'min_stars' => 1, 'max_stars' => 2],
-    ]]]);
-    skillJoin($session, [2, 2, 2, 2]);
-    $playing = skillMatches($session, MatchStatus::Playing)[0];
-    expect($playing->court_group)->toBe(3)->and($playing->court_no)->toBe(5);
-
-    // Three groups become two: the match keeps index 3, which no longer exists, but court 5 is in group 2 (1 to 3 stars).
-    skillSvc()->update($session->fresh(), ['mode_settings' => ['skill_groups' => SkillGroups::defaultFor(6)->toArray()]]);
-    expect($playing->fresh()->court_group)->toBe(3)->and($playing->fresh()->status)->toBe(MatchStatus::Playing);
-
-    $out = Player::findOrFail($playing->matchPlayers()->first()->player_id);
-    [$high] = skillJoin($session->fresh(), [5]);
-
-    // Only a 5 star waits and it is not in the court's group: nobody is picked.
-    expect(fn () => app(MatchService::class)->remove($session->fresh(), $playing, $out))
-        ->toThrow(ValidationException::class, 'No waiting player is available to take that slot.');
-
-    [$low] = skillJoin($session->fresh(), [3]);
-    app(MatchService::class)->remove($session->fresh(), $playing, $out);
-    expect(matchIds($playing->fresh()))->toContain($low->id)->not->toContain($high->id);
-});
-
-test('remove on a match that started before the switch to skill courts resolves its group by court', function () {
-    $session = PlaySession::factory()->for(Club::factory()->create())->live()->create(['courts' => 4, 'up_next_count' => 1, 'auto_fill' => true]);
-    skillJoin($session, [2, 2, 2, 2]);
-    $playing = skillMatches($session, MatchStatus::Playing)[0];
-    expect($playing->court_group)->toBeNull()->and($playing->court_no)->toBe(1);
-
-    skillSvc()->update($session->fresh(), ['rotation_mode' => 'skill_courts']);
-    [$low, $high] = skillJoin($session->fresh(), [2, 5]);
-    $out = Player::findOrFail($playing->matchPlayers()->first()->player_id);
-
-    // Court 1 is in the top group (4 to 6 stars), so the 5 star takes the slot, not the 2 star.
-    app(MatchService::class)->remove($session->fresh(), $playing, $out);
-
-    expect(matchIds($playing->fresh()))->toContain($high->id)->not->toContain($low->id);
 });
 
 test('a live switch away from skill courts and back voids Up Next, keeps playing matches and applies the default groups', function () {
@@ -696,4 +631,58 @@ test('the public view has an empty group list in other modes and before the sess
 
     expect(app(PublicSessionView::class)->snapshot($session)['groups'])->toBe([])
         ->and(app(PublicSessionView::class)->snapshot($draft)['groups'])->toBe([]);
+});
+
+// --- swapping in an Up Next player ---
+
+test('swapping in an Up Next player refills their match from their own group only', function () {
+    $session = skillBoard();
+    skillJoin($session, [5, 5, 5, 5]);
+    skillJoin($session, [2, 2, 2, 2, 2]);
+    $high = collect(skillMatches($session, MatchStatus::Staged))->firstWhere('court_group', 1);
+    $low = collect(skillMatches($session, MatchStatus::Staged))->firstWhere('court_group', 2);
+    $out = Player::findOrFail($high->matchPlayers()->first()->player_id);
+    $in = Player::findOrFail($low->matchPlayers()->first()->player_id);
+    $spare = Player::query()->whereNotIn('id', [...matchIds($high), ...matchIds($low)])->where('club_id', $session->club_id)->firstOrFail();
+
+    app(MatchService::class)->swap($session, $high, $out, $in);
+
+    // The cross-group swap is allowed. The low match takes the spare 2 star, never the swapped-out 5 star.
+    expect(matchIds($high->fresh()))->toContain($in->id)->not->toContain($out->id)
+        ->and($high->fresh()->court_group)->toBe(1)
+        ->and($low->fresh()->status)->toBe(MatchStatus::Staged)
+        ->and(matchIds($low->fresh()))->toContain($spare->id)->not->toContain($out->id)->toHaveCount(4)
+        ->and($low->fresh()->court_group)->toBe(2);
+});
+
+test('an Up Next match with nobody left in its group is voided by the swap', function () {
+    $session = skillBoard();
+    skillJoin($session, [5, 5, 5, 5]);
+    skillJoin($session, [2, 2, 2, 2]);
+    $high = collect(skillMatches($session, MatchStatus::Staged))->firstWhere('court_group', 1);
+    $low = collect(skillMatches($session, MatchStatus::Staged))->firstWhere('court_group', 2);
+    $out = Player::findOrFail($high->matchPlayers()->first()->player_id);
+    $in = Player::findOrFail($low->matchPlayers()->first()->player_id);
+    $lowRest = array_values(array_diff(matchIds($low), [$in->id]));
+
+    app(MatchService::class)->swap($session, $high, $out, $in);
+
+    // The swapped-out 5 star is not in the low group and nobody else waits there, so the low match is voided.
+    expect(matchIds($high->fresh()))->toContain($in->id)
+        ->and($low->fresh()->status)->toBe(MatchStatus::Void)
+        ->and(skillMatches($session, MatchStatus::Staged))->toHaveCount(1);
+    foreach ($lowRest as $id) {
+        expect(SessionPlayer::query()->where('player_id', $id)->value('status'))->toBe(SessionPlayerStatus::Waiting);
+    }
+});
+
+test('swap candidates in skill courts carry the group of each Up Next match', function () {
+    $session = skillBoard();
+    skillJoin($session, [5, 5, 5, 5, 2, 2, 2, 2]);
+    $high = collect(skillMatches($session, MatchStatus::Staged))->firstWhere('court_group', 1);
+
+    $rows = app(SessionBoard::class)->swapCandidates($session, $high->id);
+
+    expect(collect($rows)->where('source', 'up_next')->pluck('group')->unique()->all())->toBe([2])
+        ->and(collect($rows)->where('source', 'up_next')->pluck('up_next_number')->unique()->all())->toBe([1]);
 });

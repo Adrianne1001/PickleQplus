@@ -71,10 +71,9 @@
                                         </flux:menu>
                                     </flux:dropdown>
                                 @endif
-                                <div class="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-2 2xl:grid-cols-4">
+                                <div class="grid grid-cols-3 gap-2 sm:grid-cols-3 xl:grid-cols-3">
                                     <flux:button class="min-h-12" icon="arrow-path" wire:click="reroll({{ $match['id'] }})" data-test="reroll-button">{{ __('Re-roll') }}</flux:button>
                                     <flux:button class="min-h-12" icon="arrows-right-left" wire:click="openPanel('swap', {{ $match['id'] }})" data-test="swap-button">{{ __('Swap') }}</flux:button>
-                                    <flux:button class="min-h-12" icon="user-minus" wire:click="openPanel('remove', {{ $match['id'] }})" data-test="remove-button">{{ __('Remove') }}</flux:button>
                                     <flux:button variant="ghost" class="min-h-12 text-red-700! dark:text-red-400!" icon="x-circle" wire:click="openPanel('void', {{ $match['id'] }})" data-test="void-button">{{ __('Void') }}</flux:button>
                                 </div>
                             </div>

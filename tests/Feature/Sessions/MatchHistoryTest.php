@@ -30,6 +30,7 @@ function historyMatch(PlaySession $session, string $a1, string $a2, string $b1, 
         'court_no' => 2,
         'team_a_score' => $scoreA,
         'team_b_score' => $scoreB,
+        'winner' => winnerFor($scoreA, $scoreB),
         'started_at' => now()->subMinutes($minutesAgo + 12),
         'finished_at' => now()->subMinutes($minutesAgo),
     ]);

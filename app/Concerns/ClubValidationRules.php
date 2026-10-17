@@ -61,6 +61,7 @@ trait ClubValidationRules
         return [
             'late_arrival_policy' => ['required', Rule::enum(LateArrivalPolicy::class)],
             'allow_concurrent_sessions' => ['required', 'boolean'],
+            'require_score' => ['required', 'boolean'],
         ];
     }
 

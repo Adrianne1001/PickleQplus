@@ -65,16 +65,18 @@
                         </div>
 
                         <div class="flex shrink-0 items-center gap-1">
-                            <span class="text-xl font-bold tabular-nums text-zinc-900 dark:text-white" data-test="result-score">
-                                <span @class(['text-brand-700 dark:text-brand-400' => $winner === 'A', 'text-zinc-500 dark:text-zinc-400 font-semibold' => $winner === 'B'])>{{ $match['score_a'] }}</span>
-                                <span class="text-zinc-400">-</span>
-                                <span @class(['text-brand-700 dark:text-brand-400' => $winner === 'B', 'text-zinc-500 dark:text-zinc-400 font-semibold' => $winner === 'A'])>{{ $match['score_b'] }}</span>
-                            </span>
+                            @if ($match['score_a'] !== null && $match['score_b'] !== null)
+                                <span class="text-xl font-bold tabular-nums text-zinc-900 dark:text-white" data-test="result-score">
+                                    <span @class(['text-brand-700 dark:text-brand-400' => $winner === 'A', 'text-zinc-500 dark:text-zinc-400 font-semibold' => $winner === 'B'])>{{ $match['score_a'] }}</span>
+                                    <span class="text-zinc-400">-</span>
+                                    <span @class(['text-brand-700 dark:text-brand-400' => $winner === 'B', 'text-zinc-500 dark:text-zinc-400 font-semibold' => $winner === 'A'])>{{ $match['score_b'] }}</span>
+                                </span>
+                            @endif
 
                             <flux:dropdown align="end">
                                 <flux:button variant="ghost" size="sm" icon="ellipsis-vertical" class="min-h-10 min-w-10" :aria-label="__('Match actions')" data-test="result-actions" />
                                 <flux:menu>
-                                    <flux:menu.item icon="pencil-square" wire:click="edit({{ $match['id'] }})" data-test="edit-score-button">{{ __('Edit score') }}</flux:menu.item>
+                                    <flux:menu.item icon="pencil-square" wire:click="edit({{ $match['id'] }})" data-test="edit-result-button">{{ __('Edit result') }}</flux:menu.item>
                                     @if ($match['id'] === $lastId && ! $session->isEnded())
                                         <flux:menu.item icon="arrow-uturn-left" wire:click="undoLast" data-test="undo-button">{{ __('Undo last result') }}</flux:menu.item>
                                     @endif
@@ -87,13 +89,26 @@
                     </div>
 
                     @if ($editingId === $match['id'])
-                        <form wire:submit="saveScore" class="mt-3 space-y-3 rounded-xl border-2 border-brand-600/60 bg-brand-50/50 p-4 dark:border-brand-500/60 dark:bg-brand-950/30" data-test="edit-score-form">
-                            <div class="grid grid-cols-2 gap-4">
-                                <flux:input wire:model="scoreA" type="number" min="0" inputmode="numeric" :label="__('Team A')" class:input="h-14! text-center text-2xl! font-bold tabular-nums" data-test="edit-score-a" />
-                                <flux:input wire:model="scoreB" type="number" min="0" inputmode="numeric" :label="__('Team B')" class:input="h-14! text-center text-2xl! font-bold tabular-nums" data-test="edit-score-b" />
+                        @php($scoreRequired = $session->require_score)
+                        <form wire:submit="saveResult" class="mt-3 space-y-4 rounded-xl border-2 border-brand-600/60 bg-brand-50/50 p-4 dark:border-brand-500/60 dark:bg-brand-950/30" data-test="edit-result-form">
+                            <flux:radio.group wire:model.live="editWinner" variant="segmented" :label="__('Winner')" data-test="edit-winner">
+                                <flux:radio value="A" :label="__('Team A won')" data-test="edit-winner-a" class="min-h-12" />
+                                <flux:radio value="B" :label="__('Team B won')" data-test="edit-winner-b" class="min-h-12" />
+                            </flux:radio.group>
+                            <div class="space-y-2">
+                                <div class="grid grid-cols-2 gap-4">
+                                    <flux:input wire:model.live.debounce.300ms="scoreA" type="number" min="0" inputmode="numeric" :label="__('Team A score')" class:input="h-14! text-center text-2xl! font-bold tabular-nums" data-test="edit-score-a" />
+                                    <flux:input wire:model.live.debounce.300ms="scoreB" type="number" min="0" inputmode="numeric" :label="__('Team B score')" class:input="h-14! text-center text-2xl! font-bold tabular-nums" data-test="edit-score-b" />
+                                </div>
+                                <flux:text class="text-sm" data-test="edit-score-help">{{ $scoreRequired ? __('This session requires a score for every match.') : __('Leave both scores blank to record the winner only.') }}</flux:text>
+                                <div aria-live="polite">
+                                    @if ($this->editHint)
+                                        <flux:text class="text-sm font-medium text-amber-800 dark:text-amber-300" data-test="edit-score-hint">{{ $this->editHint }}</flux:text>
+                                    @endif
+                                </div>
                             </div>
                             <div class="grid grid-cols-2 gap-2">
-                                <flux:button variant="primary" type="submit" class="min-h-12" data-test="save-score-button">{{ __('Save score') }}</flux:button>
+                                <flux:button variant="primary" type="submit" class="min-h-12" data-test="save-result-button">{{ __('Save result') }}</flux:button>
                                 <flux:button variant="ghost" type="button" class="min-h-12" wire:click="cancelEdit">{{ __('Cancel') }}</flux:button>
                             </div>
                         </form>

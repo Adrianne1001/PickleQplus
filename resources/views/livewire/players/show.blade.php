@@ -125,7 +125,7 @@
                             <td class="px-4 py-3"><a href="{{ route('clubs.sessions.results', [$club, $h['session_id']]) }}" wire:navigate class="hover:text-brand-700 hover:underline dark:hover:text-brand-400">{{ $h['session_name'] }}</a></td>
                             <td class="px-4 py-3">{{ $h['partner'] ?? '–' }}</td>
                             <td class="px-4 py-3">{{ implode(' & ', $h['opponents']) }}</td>
-                            <td class="whitespace-nowrap px-4 py-3 text-end font-semibold tabular-nums">{{ $h['score_for'] }} - {{ $h['score_against'] }}</td>
+                            <td class="whitespace-nowrap px-4 py-3 text-end font-semibold tabular-nums">@if ($h['score_for'] !== null){{ $h['score_for'].' - '.$h['score_against'] }}@endif</td>
                             <td class="px-4 py-3 text-center">
                                 <flux:badge size="sm" :color="$h['won'] ? 'green' : 'red'">{{ $h['won'] ? __('W') : __('L') }}</flux:badge>
                             </td>
